@@ -15,8 +15,10 @@ RUN trunk build --release
 RUN cargo build --release -p senders-server
 
 FROM debian:bookworm-slim
+# curl is here for the container healthcheck: the image has no shell builtin
+# that can speak HTTP (debian-slim's /bin/sh is dash, so no /dev/tcp).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin senders
 
