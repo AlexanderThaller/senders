@@ -321,6 +321,18 @@ The one thing that is restated is `crate_features` on the server targets:
 rules_rust takes first-party feature flags explicitly, so the `s3` and `oidc`
 defaults are named in `crates/server/BUILD.bazel`.
 
+AWS-LC is built by Bazel's own cc rules rather than by `aws-lc-sys`' build
+script, via the annotations rules_rs recommends. The build script drives cc-rs
+over a few thousand C files as one serial action; as ordinary Bazel actions the
+same work fans out. Measured on one machine with `bazel clean` and no caches, a
+cold build of `//crates/server:senders` goes from **80s to 46s** — the action
+count rises from 845 to 1335, which is exactly the point.
+
+Cache behaviour was already good and is unchanged: from a fresh checkout with a
+warm disk cache, every non-internal action is a hit (782/782, six seconds). The
+sandbox-path nondeterminism that usually motivates these annotations does not
+bite this repository.
+
 **Bazel does not build the frontend.** `crates/web` targets
 `wasm32-unknown-unknown` and needs wasm-bindgen, wasm-opt and asset hashing on
 top of rustc, all of which trunk already does. Run `trunk build --release`
