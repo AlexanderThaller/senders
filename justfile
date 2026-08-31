@@ -72,8 +72,30 @@ test-wasm:
 # Everything, both toolchains.
 test-all: test test-wasm
 
-# What CI should run.
-ci: test-all
+# `just ci` runs exactly what the two workflows run, so a green local run is the
+# only way to know a push will pass. The granular recipes above are for working;
+# these are for checking.
+#
+# --lockfile_mode=error lives in ci-bazel and not in `test`: it fails on a stale
+# MODULE.bazel.lock rather than regenerating it, which is what you want in CI
+# and not what you want mid-change.
+
+# Everything both CI workflows run.
+ci: ci-bazel ci-wasm
+
+# The Bazel workflow: build, tests, clippy and rustfmt.
+ci-bazel:
+    bazel test --lockfile_mode=error //...
+
+# Bazel does not build crates/web, so its lints and format check have no Bazel
+# target and have to run through cargo. Without this, `just ci` would pass while
+# CI failed.
+
+# The wasm job: frontend lints, format check and tests.
+ci-wasm:
+    cd crates/web && cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
+    cd crates/web && cargo fmt --all -- --check
+    cd crates/web && cargo test --target wasm32-unknown-unknown
 
 # --- running -----------------------------------------------------------------
 

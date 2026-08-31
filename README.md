@@ -238,11 +238,15 @@ straight into blob storage without buffering the whole file.
 ## Development
 
 ```sh
+just ci          # exactly what the two CI workflows run
 just test        # build, tests, clippy and rustfmt, in one Bazel invocation
 just test-wasm   # browser-crypto tests, run under Node against the built wasm
 just fmt         # reformat in place
-just ci          # both of the above
 ```
+
+`just ci` is the one to trust before pushing: `just test` covers only the Bazel
+targets, and `crates/web` has none, so its clippy and format check run through
+cargo in `just ci-wasm`.
 
 The native crates go through Bazel; only the frontend recipes shell out to
 trunk and cargo, because Bazel does not build it.
