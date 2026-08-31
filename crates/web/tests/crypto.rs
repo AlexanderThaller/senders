@@ -1,8 +1,17 @@
-//! Tests for the real WebCrypto code path, run against the compiled wasm.
+//! Tests for the real `WebCrypto` code path, run against the compiled wasm.
 //!
 //! These are the tests that matter most: if record framing or key separation
 //! is wrong, the server-side tests would still pass while every file shipped
 //! would be unrecoverable or forgeable.
+
+#![expect(
+    clippy::unwrap_used,
+    reason = "these are tests; #[wasm_bindgen_test] does not expand to #[test], so allow-unwrap-in-tests cannot see that"
+)]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "test fixtures build byte patterns from indices"
+)]
 
 use senders_proto::{CHUNK_SIZE, NONCE_PREFIX_LEN, SECRET_LEN};
 use senders_web::crypto::{self, FileKeys};

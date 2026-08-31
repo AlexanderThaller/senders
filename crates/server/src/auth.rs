@@ -1,4 +1,4 @@
-//! Sessions and optional OpenID Connect login.
+//! Sessions and optional `OpenID` Connect login.
 //!
 //! Sessions are stateless: a signed, HMAC-SHA256-authenticated cookie carrying
 //! the subject, a display name, and an expiry. Nothing needs to be stored
@@ -21,22 +21,30 @@ use sha2::Sha256;
 #[cfg(feature = "oidc")]
 pub mod oidc;
 
+/// Cookie carrying the signed session.
 pub const SESSION_COOKIE: &str = "senders_session";
+/// Cookie carrying an in-flight login: PKCE verifier, nonce, CSRF state and
+/// where to land afterwards.
 pub const FLOW_COOKIE: &str = "senders_oidc_flow";
 
 /// Contents of a session cookie.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Session {
+    /// Stable identifier for the user, from the identity provider.
     pub sub: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Email address, when the provider supplies one.
     pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    /// Display name, when the provider supplies one.
     pub name: Option<String>,
     /// Absolute expiry, seconds since the epoch.
     pub exp: u64,
 }
 
 impl Session {
+    /// The subset of the session the frontend is allowed to see.
+    #[must_use]
     pub fn info(&self) -> SessionInfo {
         SessionInfo {
             subject: self.sub.clone(),
@@ -54,7 +62,22 @@ pub struct SessionSigner {
     secure: bool,
 }
 
+impl std::fmt::Debug for SessionSigner {
+    /// Hand-written so the signing key cannot reach a log line: anyone holding
+    /// it can mint a session for any user.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SessionSigner")
+            .field("key", &"<redacted>")
+            .field("secure", &self.secure)
+            .finish()
+    }
+}
+
 impl SessionSigner {
+    /// Build a signer. Without a configured secret a random key is generated,
+    /// which means sessions do not survive a restart and are not shared
+    /// between replicas.
+    #[must_use]
     pub fn new(secret: Option<&str>, secure: bool) -> Self {
         let key = match secret {
             // Hash rather than truncate, so any length of configured secret
@@ -78,6 +101,8 @@ impl SessionSigner {
         Ok(format!("{}.{}", b64::encode(&payload), b64::encode(tag)))
     }
 
+    #[must_use]
+    /// Check the tag and decode the payload, or `None` if either fails.
     pub fn verify<T: for<'de> Deserialize<'de>>(&self, token: &str) -> Option<T> {
         let (payload_b64, tag_b64) = token.split_once('.')?;
         let payload = b64::decode(payload_b64)?;
@@ -89,6 +114,7 @@ impl SessionSigner {
     }
 
     /// A `Set-Cookie` value. `max_age` of `None` clears the cookie.
+    #[must_use]
     pub fn cookie(&self, name: &str, value: &str, max_age: Option<u64>) -> HeaderValue {
         let mut cookie = match max_age {
             Some(age) => format!("{name}={value}; Max-Age={age}"),
@@ -101,10 +127,13 @@ impl SessionSigner {
         HeaderValue::from_str(&cookie).expect("cookie components are base64url and ASCII")
     }
 
+    /// A `Set-Cookie` value carrying a freshly signed session.
     pub fn session_cookie(&self, session: &Session, ttl: u64) -> anyhow::Result<HeaderValue> {
         Ok(self.cookie(SESSION_COOKIE, &self.sign(session)?, Some(ttl)))
     }
 
+    /// A `Set-Cookie` value that deletes `name`.
+    #[must_use]
     pub fn clear(&self, name: &str) -> HeaderValue {
         self.cookie(name, "", None)
     }
@@ -122,6 +151,7 @@ pub fn read_cookie(headers: &HeaderMap, name: &str) -> Option<String> {
         .map(|(_, value)| value.to_string())
 }
 
+/// Append a `Set-Cookie` header, keeping any already present.
 pub fn set_cookie(headers: &mut HeaderMap, value: HeaderValue) {
     headers.append(SET_COOKIE, value);
 }
@@ -131,6 +161,8 @@ pub fn set_cookie(headers: &mut HeaderMap, value: HeaderValue) {
 pub struct CurrentUser(pub Option<Session>);
 
 impl CurrentUser {
+    /// The signed-in user's subject, if there is one.
+    #[must_use]
     pub fn subject(&self) -> Option<&str> {
         self.0.as_ref().map(|session| session.sub.as_str())
     }
@@ -139,6 +171,10 @@ impl CurrentUser {
 impl FromRequestParts<AppState> for CurrentUser {
     type Rejection = std::convert::Infallible;
 
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the extractor trait declares this async; there is nothing to await"
+    )]
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
@@ -162,6 +198,10 @@ pub struct AuthedUser(pub Option<Session>);
 impl FromRequestParts<AppState> for AuthedUser {
     type Rejection = AppError;
 
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the extractor trait declares this async; there is nothing to await"
+    )]
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,
@@ -180,6 +220,10 @@ pub struct PublicOrAuthedUser(pub Option<Session>);
 impl FromRequestParts<AppState> for PublicOrAuthedUser {
     type Rejection = AppError;
 
+    #[expect(
+        clippy::unused_async_trait_impl,
+        reason = "the extractor trait declares this async; there is nothing to await"
+    )]
     async fn from_request_parts(
         parts: &mut Parts,
         state: &AppState,

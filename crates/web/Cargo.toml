@@ -7,6 +7,28 @@ description = "Browser frontend for senders: encrypts and decrypts in the client
 
 [workspace]
 
+# crates/web is deliberately a separate Cargo workspace (see the root
+# manifest), so the lint table cannot be inherited and is repeated here.
+[workspace.lints.rust]
+missing-docs = "warn"
+missing-debug-implementations = "warn"
+rust-2018-idioms = "warn"
+unsafe-code = "forbid"
+unused-lifetimes = "warn"
+
+[workspace.lints.clippy]
+allow-attributes = "warn"
+allow-attributes-without-reason = "warn"
+dbg-macro = "warn"
+pedantic = { level = "warn", priority = -1 }
+todo = "warn"
+unwrap-used = "warn"
+missing-panics-doc = "allow"
+missing-errors-doc = "allow"
+wildcard-enum-match-arm = "warn"
+disallowed-methods = "deny"
+similar-names = { level = "allow", priority = 10 }
+
 [dependencies]
 senders-proto = { path = "../proto" }
 
@@ -47,3 +69,6 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[lints]
+workspace = true

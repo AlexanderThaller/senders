@@ -6,9 +6,16 @@
 
 pub mod api;
 pub mod crypto;
-pub mod i18n;
 pub mod transfer;
-pub mod ui;
+
+mod convert;
+
+// Application internals rather than API. The integration tests drive `crypto`,
+// `transfer` and `api`; nothing outside the crate needs the string tables or
+// the components, and keeping them private keeps `missing_docs` focused on the
+// surface that other code actually calls.
+mod i18n;
+mod ui;
 
 use i18n::{Lang, t};
 use leptos::prelude::*;
@@ -31,8 +38,12 @@ pub fn start() {
     leptos::mount::mount_to_body(App);
 }
 
+/// The application root: language detection, server info, and the router.
+///
+/// Private: `start` is the only way in, and nothing outside the crate mounts
+/// the tree itself.
 #[component]
-pub fn App() -> impl IntoView {
+fn App() -> impl IntoView {
     // One detection for the whole tree, so nothing renders in two languages.
     let lang = Lang::detect();
     provide_context(lang);
@@ -128,7 +139,7 @@ fn Footer(info: Signal<Option<ServerInfo>>) -> impl IntoView {
                     info.get()
                         .map(|info| {
                             lang.footer_limits(
-                                &format_bytes(info.max_file_size as f64),
+                                &format_bytes(convert::to_f64(info.max_file_size)),
                                 info.max_expiry_secs / 86_400,
                             )
                         })

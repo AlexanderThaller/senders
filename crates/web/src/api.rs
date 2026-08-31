@@ -13,8 +13,11 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Blob, Headers, Request, RequestInit, Response};
 
 #[derive(Debug, Clone)]
+/// A failed API call.
 pub struct ApiError {
+    /// HTTP status, or `0` when the request never reached the server.
     pub status: u16,
+    /// Message safe to show the user; the server's own wording when it sent one.
     pub message: String,
 }
 
@@ -26,10 +29,14 @@ impl ApiError {
         }
     }
 
+    #[must_use]
+    /// The download capability was rejected — usually a wrong passphrase.
     pub fn is_unauthorized(&self) -> bool {
         self.status == 401
     }
 
+    #[must_use]
+    /// The share is gone: expired, used up, or deleted.
     pub fn is_missing(&self) -> bool {
         self.status == 404 || self.status == 410
     }
@@ -53,6 +60,7 @@ impl From<crate::crypto::Error> for ApiError {
     }
 }
 
+/// Result shorthand for API calls.
 pub type Result<T> = std::result::Result<T, ApiError>;
 
 fn window() -> Result<web_sys::Window> {
@@ -70,8 +78,10 @@ async fn check(response: Response) -> Result<Response> {
         Ok(text) => text
             .as_string()
             .and_then(|body| serde_json::from_str::<senders_proto::ApiError>(&body).ok())
-            .map(|err| err.message)
-            .unwrap_or_else(|| format!("request failed with status {status}")),
+            .map_or_else(
+                || format!("request failed with status {status}"),
+                |err| err.message,
+            ),
         Err(_) => format!("request failed with status {status}"),
     };
     Err(ApiError::new(status, message))
@@ -107,11 +117,13 @@ fn bearer(auth_key: &[u8]) -> Result<Headers> {
     Ok(headers)
 }
 
+/// `GET /api/info` — limits and session state.
 pub async fn server_info() -> Result<ServerInfo> {
     json(fetch(request("GET", "/api/info", &Headers::new()?)?).await?).await
 }
 
 /// Unauthenticated pre-flight: is a password needed, and with which salt?
+/// `GET /api/files/{id}/params` — the unauthenticated pre-flight.
 pub async fn params(id: &str) -> Result<FileParams> {
     json(
         fetch(request(
@@ -124,6 +136,7 @@ pub async fn params(id: &str) -> Result<FileParams> {
     .await
 }
 
+/// `GET /api/files/{id}/metadata` — the sealed name/type blob.
 pub async fn metadata(id: &str, auth_key: &[u8]) -> Result<MetadataResponse> {
     json(
         fetch(request(
@@ -136,6 +149,7 @@ pub async fn metadata(id: &str, auth_key: &[u8]) -> Result<MetadataResponse> {
     .await
 }
 
+/// `DELETE /api/files/{id}` — revoke a share.
 pub async fn delete(id: &str, owner_token: &str) -> Result<()> {
     let headers = Headers::new()?;
     headers.set("X-Senders-Owner", owner_token)?;
@@ -144,12 +158,19 @@ pub async fn delete(id: &str, owner_token: &str) -> Result<()> {
 }
 
 /// Parameters that ride alongside an upload body.
+#[derive(Debug, Clone)]
 pub struct UploadParams {
+    /// base64url sealed metadata blob.
     pub metadata: String,
+    /// base64url SHA-256 of the download capability.
     pub auth_hash: String,
+    /// base64url STREAM nonce prefix.
     pub nonce_prefix: String,
+    /// base64url PBKDF2 salt, when a passphrase is set.
     pub auth_salt: Option<String>,
+    /// Requested lifetime in seconds.
     pub expires_in: u64,
+    /// Requested download budget.
     pub max_downloads: u32,
 }
 
@@ -201,9 +222,10 @@ pub async fn upload(
         return Err(ApiError::new(0, "the upload was interrupted"));
     }
     if !(200..300).contains(&status) {
-        let message = serde_json::from_str::<senders_proto::ApiError>(&text)
-            .map(|err| err.message)
-            .unwrap_or_else(|_| format!("upload failed with status {status}"));
+        let message = serde_json::from_str::<senders_proto::ApiError>(&text).map_or_else(
+            |_| format!("upload failed with status {status}"),
+            |err| err.message,
+        );
         return Err(ApiError::new(status, message));
     }
     serde_json::from_str(&text)

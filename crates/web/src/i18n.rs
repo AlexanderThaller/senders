@@ -25,7 +25,7 @@ impl Lang {
             {
                 "de" => return Self::De,
                 "en" => return Self::En,
-                _ => continue,
+                _ => {}
             }
         }
         Self::En
@@ -45,8 +45,7 @@ impl Lang {
             return window
                 .navigator()
                 .language()
-                .map(|tag| Self::from_tags([tag.as_str()]))
-                .unwrap_or(Self::En);
+                .map_or(Self::En, |tag| Self::from_tags([tag.as_str()]));
         }
         Self::from_tags(tags.iter().map(String::as_str))
     }
@@ -86,7 +85,7 @@ impl Lang {
 
     /// A coarse "in 3 days" description of an absolute timestamp.
     pub fn until(self, expires_at: u64) -> String {
-        let now = (js_sys::Date::now() / 1000.0) as u64;
+        let now = crate::convert::to_u64(js_sys::Date::now() / 1000.0);
         if expires_at <= now {
             return match self {
                 Self::En => "expired".into(),

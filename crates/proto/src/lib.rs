@@ -29,37 +29,56 @@ pub const AUTH_SALT_LEN: usize = 16;
 /// PBKDF2-HMAC-SHA256 iterations for password-protected files.
 pub const PBKDF2_ITERATIONS: u32 = 250_000;
 
-/// HKDF `info` strings. Distinct labels keep the derived keys independent.
+/// HKDF `info` label for the file-body key. Distinct labels are what keep the
+/// three derived keys independent of one another.
 pub const INFO_CONTENT: &[u8] = b"senders/v1/content";
+/// HKDF `info` label for the key that seals the name/type metadata.
 pub const INFO_METADATA: &[u8] = b"senders/v1/metadata";
+/// HKDF `info` label for the download capability.
 pub const INFO_AUTH: &[u8] = b"senders/v1/auth";
 
-/// Expiry bounds, in seconds: one day to thirty days.
+/// Shortest lifetime a share may be given, in seconds.
 pub const MIN_EXPIRY_SECS: u64 = 24 * 60 * 60;
+/// Longest lifetime a share may be given, in seconds. A server may lower this
+/// but not raise it.
 pub const MAX_EXPIRY_SECS: u64 = 30 * 24 * 60 * 60;
+/// Lifetime used when the client does not ask for one.
 pub const DEFAULT_EXPIRY_SECS: u64 = MIN_EXPIRY_SECS;
 
-/// Download-count bounds. `1` means "delete immediately after one download".
+/// Smallest download budget: one download, then the file is destroyed.
 pub const MIN_DOWNLOADS: u32 = 1;
+/// Largest download budget a client may request.
 pub const MAX_DOWNLOADS: u32 = 1000;
+/// Budget used when the client does not ask for one. Burn after reading is the
+/// safer default, so it is the default.
 pub const DEFAULT_MAX_DOWNLOADS: u32 = 1;
 
 /// Headers carrying upload parameters alongside the streamed ciphertext body.
 pub mod header {
+    /// base64url ciphertext of the JSON [`FileMetadata`](super::FileMetadata).
     pub const METADATA: &str = "x-senders-metadata";
+    /// base64url SHA-256 of the download capability.
     pub const AUTH_HASH: &str = "x-senders-auth-hash";
+    /// base64url PBKDF2 salt; present only for passphrase-protected files.
     pub const AUTH_SALT: &str = "x-senders-auth-salt";
+    /// base64url STREAM nonce prefix.
     pub const NONCE_PREFIX: &str = "x-senders-nonce-prefix";
+    /// Requested lifetime in seconds; clamped by the server.
     pub const EXPIRES_IN: &str = "x-senders-expires-in";
+    /// Requested download budget; clamped by the server.
     pub const MAX_DOWNLOADS: &str = "x-senders-max-downloads";
 }
 
 /// Cleartext metadata about a file, encrypted client-side before upload.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileMetadata {
+    /// The file name as the sender chose it.
     pub name: String,
+    /// MIME type, so the download is saved as the right kind of file.
     #[serde(default)]
     pub mime: String,
+    /// Plaintext length in bytes.
+    #[serde(default)]
     pub size: u64,
 }
 
@@ -67,8 +86,11 @@ pub struct FileMetadata {
 /// in cleartext by the server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UploadResponse {
+    /// Share identifier; the part of the link before the `#`.
     pub id: String,
+    /// Proof of ownership, shown once and never stored in the clear.
     pub owner_token: String,
+    /// Absolute expiry, seconds since the Unix epoch.
     pub expires_at: u64,
 }
 
@@ -77,19 +99,25 @@ pub struct UploadResponse {
 /// which salt).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileParams {
+    /// Share identifier, echoed back.
     pub id: String,
+    /// Whether a passphrase is needed before anything can be downloaded.
     pub has_password: bool,
     /// base64url PBKDF2 salt; present only when `has_password`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auth_salt: Option<String>,
+    /// PBKDF2 iteration count to use with `auth_salt`.
     pub kdf_iterations: u32,
+    /// Absolute expiry, seconds since the Unix epoch.
     pub expires_at: u64,
+    /// Downloads still allowed before the file is destroyed.
     pub downloads_remaining: u32,
 }
 
 /// Authenticated metadata response: everything needed to start decrypting.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetadataResponse {
+    /// Share identifier, echoed back.
     pub id: String,
     /// base64url AES-GCM ciphertext of a JSON [`FileMetadata`], nonce-prefixed.
     pub metadata: String,
@@ -97,18 +125,26 @@ pub struct MetadataResponse {
     pub nonce_prefix: String,
     /// Ciphertext length in bytes.
     pub size: u64,
+    /// Absolute expiry, seconds since the Unix epoch.
     pub expires_at: u64,
+    /// Downloads still allowed before the file is destroyed.
     pub downloads_remaining: u32,
 }
 
 /// Owner-only view of a file's state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OwnerInfo {
+    /// Share identifier, echoed back.
     pub id: String,
+    /// Downloads served so far.
     pub downloads: u32,
+    /// Total download budget.
     pub max_downloads: u32,
+    /// Absolute expiry, seconds since the Unix epoch.
     pub expires_at: u64,
+    /// Ciphertext length in bytes.
     pub size: u64,
+    /// Whether a passphrase is required to download.
     pub has_password: bool,
 }
 
@@ -125,24 +161,35 @@ pub struct SetPasswordRequest {
 /// Server limits and auth state, fetched by the frontend at boot.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
+    /// Largest ciphertext this server accepts, in bytes.
     pub max_file_size: u64,
+    /// Shortest lifetime this server offers, in seconds.
     pub min_expiry_secs: u64,
+    /// Longest lifetime this server offers, in seconds.
     pub max_expiry_secs: u64,
+    /// Lifetime applied when the client does not choose one.
     pub default_expiry_secs: u64,
+    /// Largest download budget this server allows.
     pub max_downloads: u32,
+    /// Download budget applied when the client does not choose one.
     pub default_max_downloads: u32,
     /// `off`, `upload`, or `all`.
     pub auth_mode: String,
+    /// Whether any route requires a signed-in user.
     pub auth_required: bool,
+    /// The current user, when signed in.
     pub session: Option<SessionInfo>,
 }
 
 /// The signed-in user, when OIDC is enabled.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
+    /// Stable identifier for the user, from the identity provider.
     pub subject: String,
+    /// Email address, when the provider supplies one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
+    /// Display name, when the provider supplies one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -150,11 +197,14 @@ pub struct SessionInfo {
 /// Uniform error body for every failing API call.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiError {
+    /// Stable machine-readable code, e.g. `not_found`.
     pub error: String,
+    /// Human-readable explanation, safe to show to the user.
     pub message: String,
 }
 
 /// Ciphertext length for a plaintext of `len` bytes under the record scheme.
+#[must_use]
 pub fn ciphertext_len(len: u64) -> u64 {
     let chunk = CHUNK_SIZE as u64;
     // An empty file still produces one (empty, authenticated) final record.
@@ -164,6 +214,7 @@ pub fn ciphertext_len(len: u64) -> u64 {
 
 /// Plaintext length recovered from a ciphertext length, or `None` if the
 /// length is not a valid encoding.
+#[must_use]
 pub fn plaintext_len(cipher_len: u64) -> Option<u64> {
     let full = CHUNK_CIPHERTEXT_SIZE as u64;
     let tag = TAG_LEN as u64;

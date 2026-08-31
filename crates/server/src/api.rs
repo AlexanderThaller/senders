@@ -30,6 +30,7 @@ const MAX_METADATA_LEN: usize = 4096;
 /// Header carrying the owner token on owner-only routes.
 const OWNER_HEADER: &str = "x-senders-owner";
 
+/// Every file route, to be merged into the application router.
 pub fn routes() -> Router<AppState> {
     Router::new()
         .route(

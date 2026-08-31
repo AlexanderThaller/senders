@@ -1,6 +1,15 @@
 //! Full client-side pipeline: a real `File` in, ciphertext out, and back again
 //! through the same re-framing the network path uses.
 
+#![expect(
+    clippy::unwrap_used,
+    reason = "these are tests; #[wasm_bindgen_test] does not expand to #[test], so allow-unwrap-in-tests cannot see that"
+)]
+#![expect(
+    clippy::cast_possible_truncation,
+    reason = "test fixtures build byte patterns from indices"
+)]
+
 use js_sys::{Array, Uint8Array};
 use senders_proto::{CHUNK_SIZE, FileMetadata, b64};
 use senders_web::crypto::FileKeys;
@@ -27,7 +36,7 @@ async fn blob_bytes(blob: &Blob) -> Vec<u8> {
 /// Feed ciphertext back in fixed-size pieces, imitating network chunking that
 /// does not line up with record boundaries.
 fn chunked(
-    bytes: Vec<u8>,
+    bytes: &[u8],
     chunk: usize,
 ) -> impl futures_util::Stream<Item = Result<Vec<u8>, senders_web::api::ApiError>> {
     let pieces: Vec<Vec<u8>> = bytes.chunks(chunk.max(1)).map(<[u8]>::to_vec).collect();
@@ -57,7 +66,7 @@ async fn round_trip(payload: &[u8], network_chunk: usize) {
         &sealed.nonce_prefix,
         ciphertext.len() as u64,
         "application/octet-stream",
-        chunked(ciphertext, network_chunk),
+        chunked(&ciphertext, network_chunk),
         |_| {},
     )
     .await
@@ -121,7 +130,7 @@ async fn a_truncated_download_is_rejected_rather_than_returned_partial() {
         &sealed.nonce_prefix,
         full_len,
         "application/octet-stream",
-        chunked(ciphertext, 8192),
+        chunked(&ciphertext, 8192),
         |_| {},
     )
     .await;

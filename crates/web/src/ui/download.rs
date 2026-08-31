@@ -38,6 +38,10 @@ struct Unlocked {
 }
 
 #[component]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a `view!` tree is one screen of markup; splitting it would scatter the page"
+)]
 pub fn DownloadPage() -> impl IntoView {
     let lang = use_lang();
     let params = use_params_map();
@@ -104,7 +108,7 @@ pub fn DownloadPage() -> impl IntoView {
         });
     });
 
-    let unlock = move |_: ()| {
+    let unlock = move |(): ()| {
         let (Some(key), Some(params)) = (key.get(), file_params.get()) else {
             return;
         };
@@ -264,7 +268,7 @@ pub fn DownloadPage() -> impl IntoView {
                                         <FileIcon size=26 />
                                     </span>
                                     <p class="headline__name">{name}</p>
-                                    <p class="headline__meta">{format_bytes(size as f64)}</p>
+                                    <p class="headline__meta">{format_bytes(crate::convert::to_f64(size))}</p>
                                 </div>
                                 <div class="rows">
                                     <div class="rows__row">

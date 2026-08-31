@@ -1,3 +1,6 @@
+//! The `senders` binary: parses configuration, wires up storage and sessions,
+//! and serves until told to stop.
+
 use anyhow::Context as _;
 use clap::Parser as _;
 use senders_server::{build_state, config::Config, reaper, router};
@@ -87,7 +90,7 @@ async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()
             .await
-            .expect("installing the Ctrl-C handler")
+            .expect("installing the Ctrl-C handler");
     };
 
     #[cfg(unix)]
@@ -101,8 +104,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
+        () = ctrl_c => {}
+        () = terminate => {}
     }
     tracing::info!("shutdown signal received");
 }

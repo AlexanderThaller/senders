@@ -6,11 +6,14 @@ use futures_util::StreamExt;
 use std::path::{Path, PathBuf};
 use tokio::io::AsyncWriteExt;
 
+#[derive(Debug)]
+/// Ciphertext stored as files under a root directory.
 pub struct FsBlobStore {
     root: PathBuf,
 }
 
 impl FsBlobStore {
+    /// Create the root directory if it does not exist.
     pub async fn new(root: impl AsRef<Path>) -> anyhow::Result<Self> {
         let root = root.as_ref().to_path_buf();
         tokio::fs::create_dir_all(&root).await?;

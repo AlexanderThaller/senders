@@ -89,7 +89,7 @@ fn upload_request(caps: &Capabilities, body: &[u8], max_downloads: u32) -> Reque
         .header(hdr::NONCE_PREFIX, b64::encode(caps.nonce_prefix))
         .header(hdr::MAX_DOWNLOADS, max_downloads.to_string())
         .body(Body::from(body.to_vec()))
-        .unwrap()
+        .expect("the upload request is well formed")
 }
 
 fn get(uri: &str, bearer: &str) -> Request<Body> {
@@ -97,7 +97,7 @@ fn get(uri: &str, bearer: &str) -> Request<Body> {
         .uri(uri)
         .header("authorization", bearer)
         .body(Body::empty())
-        .unwrap()
+        .expect("the GET request is well formed")
 }
 
 async fn upload(

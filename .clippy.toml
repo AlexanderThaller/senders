@@ -1,0 +1,5 @@
+# Tests are allowed to be blunt: an unwrap that panics is a failed test, which
+# is exactly the reporting we want there, and dbg! is a debugging aid that the
+# lint still catches if it escapes into non-test code.
+allow-dbg-in-tests = true
+allow-unwrap-in-tests = true

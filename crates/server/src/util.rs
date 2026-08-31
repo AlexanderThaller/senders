@@ -5,14 +5,15 @@ use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 /// Seconds since the Unix epoch.
+#[must_use]
 pub fn now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |d| d.as_secs())
 }
 
 /// `N` bytes from the OS CSPRNG.
+#[must_use]
 pub fn random_bytes<const N: usize>() -> [u8; N] {
     let mut buf = [0u8; N];
     rand::rng().fill_bytes(&mut buf);
@@ -20,15 +21,19 @@ pub fn random_bytes<const N: usize>() -> [u8; N] {
 }
 
 /// A URL-safe random identifier with 128 bits of entropy.
+#[must_use]
 pub fn random_id() -> String {
     senders_proto::b64::encode(random_bytes::<16>())
 }
 
 /// A URL-safe random token with 256 bits of entropy.
+#[must_use]
 pub fn random_token() -> String {
     senders_proto::b64::encode(random_bytes::<32>())
 }
 
+/// SHA-256 of `data`.
+#[must_use]
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -36,12 +41,14 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 }
 
 /// Constant-time comparison, so token checks do not leak a prefix by timing.
+#[must_use]
 pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.ct_eq(b).into()
 }
 
 /// Reject identifiers that are not exactly what [`random_id`] produces, so a
 /// malicious id can never escape a storage prefix or blow up a Redis key.
+#[must_use]
 pub fn is_valid_id(id: &str) -> bool {
     id.len() == 22
         && id

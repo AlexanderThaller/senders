@@ -1,6 +1,6 @@
 //! Client-side cryptography.
 //!
-//! Everything runs against the browser's WebCrypto implementation, so the
+//! Everything runs against the browser's `WebCrypto` implementation, so the
 //! actual AES and SHA work happens in audited native code with hardware
 //! acceleration. This module only arranges the calls.
 //!
@@ -32,8 +32,14 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{CryptoKey, SubtleCrypto};
 
+/// Result shorthand for the cryptographic operations in this module.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// A cryptographic operation failed.
+///
+/// The string is whatever `WebCrypto` reported. Decryption failures are
+/// deliberately indistinguishable from one another: a caller cannot tell a
+/// wrong key from a tampered record, which is the point.
 #[derive(Debug, Clone)]
 pub struct Error(pub String);
 
@@ -54,11 +60,11 @@ impl From<JsValue> for Error {
     }
 }
 
-/// Reach WebCrypto through the global object rather than through `window`,
+/// Reach `WebCrypto` through the global object rather than through `window`,
 /// so this works in a page, in a worker, and under the test runner alike.
 ///
 /// A missing `crypto` global almost always means an insecure context:
-/// browsers only expose WebCrypto over HTTPS or on localhost.
+/// browsers only expose `WebCrypto` over HTTPS or on localhost.
 fn crypto() -> Result<web_sys::Crypto> {
     let found = js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("crypto"))?;
     if found.is_undefined() || found.is_null() {
@@ -105,6 +111,11 @@ pub fn generate_passphrase() -> Result<String> {
         out.push(PASSPHRASE_ALPHABET[(byte & 0x1F) as usize] as char);
     }
     Ok(out)
+}
+
+/// A byte length in bits, as `WebCrypto`'s key and tag parameters want it.
+fn bits(bytes: usize) -> u32 {
+    u32::try_from(bytes * 8).expect("key and tag lengths are small compile-time constants")
 }
 
 fn bytes_object(bytes: &[u8]) -> Object {
@@ -159,7 +170,7 @@ async fn hkdf(secret: &[u8], info: &[u8]) -> Result<Vec<u8>> {
     set(&params, "salt", bytes_object(&[]))?;
     set(&params, "info", bytes_object(info))?;
 
-    resolve_bytes(subtle.derive_bits_with_object(&params, &base, (KEY_LEN * 8) as u32)?).await
+    resolve_bytes(subtle.derive_bits_with_object(&params, &base, bits(KEY_LEN))?).await
 }
 
 /// Derive an auth key from a password. Deliberately slow: this is the only
@@ -182,7 +193,7 @@ pub async fn pbkdf2(password: &str, salt: &[u8], iterations: u32) -> Result<Vec<
     set(&params, "salt", bytes_object(salt))?;
     set(&params, "iterations", iterations)?;
 
-    resolve_bytes(subtle.derive_bits_with_object(&params, &base, (KEY_LEN * 8) as u32)?).await
+    resolve_bytes(subtle.derive_bits_with_object(&params, &base, bits(KEY_LEN))?).await
 }
 
 async fn import_aes(key: &[u8]) -> Result<CryptoKey> {
@@ -203,7 +214,7 @@ fn gcm_params(nonce: &[u8]) -> Result<Object> {
     let params = Object::new();
     set(&params, "name", "AES-GCM")?;
     set(&params, "iv", bytes_object(nonce))?;
-    set(&params, "tagLength", (TAG_LEN * 8) as u32)?;
+    set(&params, "tagLength", bits(TAG_LEN))?;
     Ok(params)
 }
 
@@ -220,7 +231,15 @@ fn record_nonce(prefix: &[u8], counter: u32, final_record: bool) -> [u8; NONCE_L
 pub struct FileKeys {
     content: CryptoKey,
     metadata: CryptoKey,
+    /// The download capability. Sent to the server only as a SHA-256 digest.
     pub auth: Vec<u8>,
+}
+
+impl std::fmt::Debug for FileKeys {
+    /// Hand-written so no key material can reach a log line.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileKeys").finish_non_exhaustive()
+    }
 }
 
 impl FileKeys {
@@ -237,6 +256,7 @@ impl FileKeys {
     }
 
     /// Replace the URL-derived auth key with a password-derived one.
+    #[must_use]
     pub fn with_auth(mut self, auth: Vec<u8>) -> Self {
         self.auth = auth;
         self
@@ -261,6 +281,7 @@ impl FileKeys {
         Ok(out)
     }
 
+    /// Open the metadata blob sealed by [`seal_metadata`](Self::seal_metadata).
     pub async fn open_metadata(&self, sealed: &[u8]) -> Result<Vec<u8>> {
         if sealed.len() < NONCE_LEN + TAG_LEN {
             return Err(Error("metadata is truncated".into()));

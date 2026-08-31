@@ -247,6 +247,29 @@ just ci          # both of the above
 The native crates go through Bazel; only the frontend recipes shell out to
 trunk and cargo, because Bazel does not build it.
 
+### Lints
+
+The lint set lives in `[workspace.lints]` in `Cargo.toml` and is deliberately
+strict: `missing_docs`, `missing_debug_implementations`, `unsafe_code =
+"forbid"`, `clippy::pedantic`, `clippy::unwrap_used`, and
+`clippy::wildcard_enum_match_arm` among others. `.clippy.toml` relaxes `unwrap`
+and `dbg!` inside tests, where a panic *is* the failure report.
+
+There is no second copy of that list for Bazel: `crate.from_cargo`'s
+`generate_lint_config` reads it out of the manifest and `lint_config()` hands
+it to every target, so `bazel build //crates/server:clippy` and
+`cargo clippy` enforce the same thing.
+
+Two consequences worth knowing:
+
+- `unsafe_code` is forbidden, not merely denied, so it cannot be re-enabled
+  locally by an attribute.
+- `#[allow]` is itself linted (`clippy::allow_attributes`), and every exception
+  needs a stated reason, so suppressions are written as
+  `#[expect(lint, reason = "…")]`. There are a handful, each explaining why —
+  mostly `f64` conversions at the JavaScript boundary, gathered in
+  `crates/web/src/convert.rs`.
+
 ### Build profiles
 
 `[profile.deploy]` in `Cargo.toml` is the shipping profile: LTO, one codegen

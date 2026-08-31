@@ -90,7 +90,9 @@ fn upload(cookie: Option<&str>) -> Request<Body> {
     if let Some(cookie) = cookie {
         builder = builder.header("cookie", cookie);
     }
-    builder.body(Body::from("ciphertext")).unwrap()
+    builder
+        .body(Body::from("ciphertext"))
+        .expect("the upload request is well formed")
 }
 
 fn params(cookie: Option<&str>) -> Request<Body> {
@@ -98,7 +100,9 @@ fn params(cookie: Option<&str>) -> Request<Body> {
     if let Some(cookie) = cookie {
         builder = builder.header("cookie", cookie);
     }
-    builder.body(Body::empty()).unwrap()
+    builder
+        .body(Body::empty())
+        .expect("the params request is well formed")
 }
 
 #[tokio::test]
@@ -200,7 +204,11 @@ async fn server_info_reports_the_mode_and_session() {
                 builder = builder.header("cookie", cookie);
             }
             let response = senders_server::router(state)
-                .oneshot(builder.body(Body::empty()).unwrap())
+                .oneshot(
+                    builder
+                        .body(Body::empty())
+                        .expect("the params request is well formed"),
+                )
                 .await
                 .unwrap();
             let body = axum::body::to_bytes(response.into_body(), usize::MAX)

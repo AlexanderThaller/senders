@@ -1,4 +1,4 @@
-//! OpenID Connect authorization-code login with PKCE.
+//! `OpenID` Connect authorization-code login with PKCE.
 //!
 //! This exists so the service can be put behind an identity provider without
 //! deploying a separate `oauth2-proxy` container next to it.
@@ -48,11 +48,22 @@ struct FlowState {
 /// How long a login may sit half-finished before the flow cookie is refused.
 const FLOW_TTL: u64 = 10 * 60;
 
+/// A discovered identity provider, ready to run logins against.
 pub struct Oidc {
     client: OidcClient,
     http: reqwest::Client,
     scopes: Vec<String>,
     allowed_domains: Vec<String>,
+}
+
+impl std::fmt::Debug for Oidc {
+    /// Hand-written because the client holds the OIDC client secret.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Oidc")
+            .field("scopes", &self.scopes)
+            .field("allowed_domains", &self.allowed_domains)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Oidc {
@@ -145,6 +156,7 @@ fn authorize_email(
 }
 
 #[derive(Debug, Deserialize)]
+/// Query string accepted by [`login`].
 pub struct LoginQuery {
     /// Where to land after a successful login.
     #[serde(default)]
@@ -164,6 +176,7 @@ fn redirect_to(location: &str) -> Response {
     (StatusCode::SEE_OTHER, [(LOCATION, location.to_string())]).into_response()
 }
 
+/// `GET /auth/login` -- start the authorization-code flow.
 pub async fn login(
     State(state): State<AppState>,
     Query(query): Query<LoginQuery>,
@@ -203,6 +216,7 @@ pub async fn login(
 }
 
 #[derive(Debug, Deserialize)]
+/// Query string the provider redirects back with.
 pub struct CallbackQuery {
     code: Option<String>,
     state: Option<String>,
@@ -210,6 +224,7 @@ pub struct CallbackQuery {
     error_description: Option<String>,
 }
 
+/// `GET /auth/callback` -- finish the flow and set a session cookie.
 pub async fn callback(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -288,6 +303,10 @@ pub async fn callback(
     Ok(response)
 }
 
+/// `GET /auth/logout` -- clear the session locally.
+///
+/// This does not perform provider-side single logout; the user stays signed in
+/// at the identity provider.
 pub async fn logout(State(state): State<AppState>) -> Response {
     let mut response = redirect_to("/");
     set_cookie(response.headers_mut(), state.sessions.clear(SESSION_COOKIE));
@@ -308,7 +327,7 @@ mod tests {
     }
 
     fn domains(list: &[&str]) -> Vec<String> {
-        list.iter().map(|d| d.to_string()).collect()
+        list.iter().map(std::string::ToString::to_string).collect()
     }
 
     #[test]

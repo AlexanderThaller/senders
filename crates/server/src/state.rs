@@ -7,13 +7,31 @@ use crate::meta::SharedMetaStore;
 use std::sync::Arc;
 
 #[derive(Clone)]
+/// Shared application state, cloned into every handler.
 pub struct AppState {
+    /// Runtime configuration.
     pub config: Arc<Config>,
+    /// Where ciphertext lives.
     pub blobs: SharedBlobStore,
+    /// Where the facts about each share live.
     pub meta: SharedMetaStore,
+    /// Signs and verifies session cookies.
     pub sessions: Arc<SessionSigner>,
     #[cfg(feature = "oidc")]
+    /// The identity provider, when login is enabled.
     pub oidc: Option<Arc<crate::auth::oidc::Oidc>>,
+}
+
+impl std::fmt::Debug for AppState {
+    /// The stores are trait objects and the signer holds key material, so this
+    /// reports the shape of the state rather than its contents.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AppState")
+            .field("storage", &self.config.storage)
+            .field("metadata", &self.config.metadata)
+            .field("auth_mode", &self.config.auth_mode.as_str())
+            .finish_non_exhaustive()
+    }
 }
 
 impl AppState {

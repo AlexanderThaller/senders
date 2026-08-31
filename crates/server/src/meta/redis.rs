@@ -4,8 +4,8 @@
 //! storage and Redis metadata, a replica keeps nothing on local disk.
 //!
 //! Layout:
-//!   `senders:f:{id}`  HASH  { rec: JSON, downloads: int, max_downloads: int }
-//!   `senders:exp`     ZSET  member = id, score = expires_at
+//!   `senders:f:{id}`  HASH  { rec: JSON, downloads: int, `max_downloads`: int }
+//!   `senders:exp`     ZSET  member = id, score = `expires_at`
 //!
 //! Each hash also carries a Redis TTL as a backstop, so a reaper that never
 //! runs still cannot leak metadata past its expiry.
@@ -13,6 +13,17 @@
 use super::{Claim, FileRecord, MetaStore};
 use anyhow::Context as _;
 use fred::prelude::*;
+
+/// Redis sorted-set scores are `f64`. Unix timestamps stay far below 2^53,
+/// where `f64` represents every integer exactly, so this is lossless for any
+/// expiry this service can express.
+#[expect(
+    clippy::cast_precision_loss,
+    reason = "unix timestamps are below 2^53, where f64 is exact"
+)]
+fn score(unix_seconds: u64) -> f64 {
+    unix_seconds as f64
+}
 
 fn file_key(id: &str) -> String {
     format!("senders:f:{id}")
@@ -23,7 +34,7 @@ const EXPIRY_ZSET: &str = "senders:exp";
 /// Claim one download slot. Returns `{status, remaining}` where status is
 /// -1 = missing, 0 = exhausted, 1 = granted. Running this as a script keeps
 /// the check-and-increment atomic across replicas.
-const CLAIM_SCRIPT: &str = r#"
+const CLAIM_SCRIPT: &str = r"
 local key = KEYS[1]
 if redis.call('EXISTS', key) == 0 then
   return {-1, 0}
@@ -35,13 +46,16 @@ if used >= max then
 end
 used = redis.call('HINCRBY', key, 'downloads', 1)
 return {1, max - used}
-"#;
+";
 
+#[derive(Debug)]
+/// Metadata in Redis, shared across replicas.
 pub struct RedisMetaStore {
     client: Client,
 }
 
 impl RedisMetaStore {
+    /// Connect and verify the server is reachable before returning.
     pub async fn connect(uri: &str) -> anyhow::Result<Self> {
         let config = Config::from_url(uri).with_context(|| format!("invalid redis URI {uri:?}"))?;
         let client = Builder::from_config(config)
@@ -93,7 +107,7 @@ impl MetaStore for RedisMetaStore {
         // Grace period so the reaper, not the TTL, is normally what deletes a
         // record — the reaper is the only path that also removes the blob.
         self.client
-            .expire::<(), _>(&key, (ttl + 3600) as i64, None)
+            .expire::<(), _>(&key, i64::try_from(ttl + 3600).unwrap_or(i64::MAX), None)
             .await?;
         self.client
             .zadd::<(), _, _>(
@@ -102,7 +116,7 @@ impl MetaStore for RedisMetaStore {
                 None,
                 false,
                 false,
-                (record.expires_at as f64, record.id.as_str()),
+                (score(record.expires_at), record.id.as_str()),
             )
             .await?;
         Ok(())
@@ -122,7 +136,7 @@ impl MetaStore for RedisMetaStore {
             (-1, _) => Claim::NotFound,
             (0, _) => Claim::Exhausted,
             (_, remaining) => Claim::Granted {
-                remaining: remaining.max(0) as u32,
+                remaining: u32::try_from(remaining.max(0)).unwrap_or(u32::MAX),
                 last: remaining <= 0,
             },
         })
@@ -158,9 +172,9 @@ impl MetaStore for RedisMetaStore {
             .zrangebyscore(
                 EXPIRY_ZSET,
                 f64::NEG_INFINITY,
-                now as f64,
+                score(now),
                 false,
-                Some((0, limit as i64)),
+                Some((0, i64::try_from(limit).unwrap_or(i64::MAX))),
             )
             .await?;
         Ok(ids)

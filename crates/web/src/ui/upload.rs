@@ -35,6 +35,10 @@ struct Share {
 }
 
 #[component]
+#[expect(
+    clippy::too_many_lines,
+    reason = "a `view!` tree is one screen of markup; splitting it would scatter the page"
+)]
 pub fn UploadPage(info: Signal<Option<ServerInfo>>) -> impl IntoView {
     let lang = use_lang();
     let file = RwSignal::new_local(None::<File>);
@@ -51,7 +55,7 @@ pub fn UploadPage(info: Signal<Option<ServerInfo>>) -> impl IntoView {
         Signal::derive(move || matches!(phase.get(), Phase::Encrypting(_) | Phase::Uploading(_)));
     let size_limit = Signal::derive(move || info.get().map(|info| info.max_file_size));
     let oversized = Signal::derive(move || match (file.get(), size_limit.get()) {
-        (Some(file), Some(limit)) => file.size() > limit as f64,
+        (Some(file), Some(limit)) => file.size() > crate::convert::to_f64(limit),
         _ => false,
     });
 
@@ -157,7 +161,7 @@ pub fn UploadPage(info: Signal<Option<ServerInfo>>) -> impl IntoView {
             };
 
             match api::upload(&sealed.blob, &params, move |done| {
-                phase.set(Phase::Uploading(done))
+                phase.set(Phase::Uploading(done));
             })
             .await
             {
@@ -192,7 +196,7 @@ pub fn UploadPage(info: Signal<Option<ServerInfo>>) -> impl IntoView {
                     <h2 class="panel__title">{move || t().step_file}</h2>
                     <span class="panel__note">
                         {move || {
-                            size_limit.get().map(|limit| lang.max_size(&format_bytes(limit as f64)))
+                            size_limit.get().map(|limit| lang.max_size(&format_bytes(crate::convert::to_f64(limit))))
                         }}
                     </span>
                 </div>
@@ -271,14 +275,17 @@ pub fn UploadPage(info: Signal<Option<ServerInfo>>) -> impl IntoView {
                         }
                             .into_any()
                     }
-                    _ => ().into_any(),
+                    Phase::Idle | Phase::Done => ().into_any(),
                 }}
 
                 {move || {
                     oversized
                         .get()
                         .then(|| {
-                            let limit = size_limit.get().map(|l| format_bytes(l as f64)).unwrap_or_default();
+                            let limit = size_limit
+                                .get()
+                                .map(|l| format_bytes(crate::convert::to_f64(l)))
+                                .unwrap_or_default();
                             view! {
                                 <p class="notice notice--bad">
                                     <span>

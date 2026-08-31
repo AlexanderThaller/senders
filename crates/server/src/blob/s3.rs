@@ -1,7 +1,7 @@
-//! S3-compatible blob store (AWS S3, MinIO, Cloudflare R2, Ceph …).
+//! S3-compatible blob store (AWS S3, `MinIO`, Cloudflare R2, Ceph …).
 //!
 //! Credentials, region and `AWS_ENDPOINT_URL` come from the standard AWS
-//! environment. Set `SENDERS_S3_PATH_STYLE=true` for MinIO and other servers
+//! environment. Set `SENDERS_S3_PATH_STYLE=true` for `MinIO` and other servers
 //! that do not do virtual-host-style addressing.
 
 use super::{BlobError, BlobStore, ByteStream};
@@ -14,6 +14,8 @@ use futures_util::StreamExt;
 /// Multipart part size. S3 requires at least 5 MiB for every part but the last.
 const PART_SIZE: usize = 8 * 1024 * 1024;
 
+#[derive(Debug)]
+/// Ciphertext stored as objects in an S3-compatible bucket.
 pub struct S3BlobStore {
     client: Client,
     bucket: String,
@@ -21,6 +23,7 @@ pub struct S3BlobStore {
 }
 
 impl S3BlobStore {
+    /// Build a client from the ambient AWS environment.
     pub async fn new(bucket: &str, prefix: &str) -> anyhow::Result<Self> {
         let shared = aws_config::load_defaults(aws_config::BehaviorVersion::latest()).await;
         let mut builder = aws_sdk_s3::config::Builder::from(&shared);
@@ -179,18 +182,15 @@ impl BlobStore for S3BlobStore {
         let mut buffer = BytesMut::new();
         let mut stream_ended = false;
         while buffer.len() < PART_SIZE {
-            match body.next().await {
-                Some(chunk) => {
-                    let chunk = chunk.map_err(anyhow::Error::from)?;
-                    if buffer.len() as u64 + chunk.len() as u64 > max_size {
-                        return Err(BlobError::TooLarge);
-                    }
-                    buffer.extend_from_slice(&chunk);
+            if let Some(chunk) = body.next().await {
+                let chunk = chunk.map_err(anyhow::Error::from)?;
+                if buffer.len() as u64 + chunk.len() as u64 > max_size {
+                    return Err(BlobError::TooLarge);
                 }
-                None => {
-                    stream_ended = true;
-                    break;
-                }
+                buffer.extend_from_slice(&chunk);
+            } else {
+                stream_ended = true;
+                break;
             }
         }
 

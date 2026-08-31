@@ -10,8 +10,18 @@
 # the BUILD files) covered by the same `bazel test //...` as everything else.
 build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
 
-# There is deliberately no clippy.toml / rustfmt.toml label_flag here: this
-# repo has neither file, so both builds use stock settings and cannot disagree.
+# The same .clippy.toml cargo reads, so `allow-unwrap-in-tests` and
+# `allow-dbg-in-tests` mean the same thing in both builds.
+#
+# The lint list itself is NOT restated here. crate.from_cargo's
+# generate_lint_config reads [workspace.lints.rust] and [workspace.lints.clippy]
+# out of Cargo.toml and lint_config() feeds them to each target, so there is no
+# second copy to drift. To see what clippy is actually handed:
+#   bazel aquery 'mnemonic("Clippy", //crates/server:senders_server)' --output=text
+build --@rules_rust//rust/settings:clippy.toml=//:.clippy.toml
+
+# There is deliberately no rustfmt.toml label_flag: this repo has no such file,
+# so both builds format with stock rustfmt and cannot disagree.
 
 # Cargo profile equivalents.
 #

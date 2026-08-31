@@ -11,6 +11,10 @@ use std::time::Duration;
 /// several ticks instead of stalling one long transaction.
 const BATCH: usize = 256;
 
+/// Sweep for expired files until `shutdown` fires.
+///
+/// This is the only path that deletes ciphertext as well as metadata, so it is
+/// what actually enforces "gone after N days".
 pub async fn run(
     state: AppState,
     interval: Duration,

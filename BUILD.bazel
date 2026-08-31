@@ -3,6 +3,8 @@
 exports_files([
     "Cargo.toml",
     "Cargo.lock",
+    # .bazelrc points the rules_rust clippy.toml label_flag at this.
+    ".clippy.toml",
 ])
 
 # The trunk-built frontend, packaged into the container image by //deploy:image.

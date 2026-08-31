@@ -8,3 +8,6 @@ description = "Shared wire types and crypto parameters for senders"
 [dependencies]
 serde.workspace = true
 base64.workspace = true
+
+[lints]
+workspace = true

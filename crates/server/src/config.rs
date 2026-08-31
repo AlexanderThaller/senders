@@ -21,6 +21,8 @@ pub enum AuthMode {
 }
 
 impl AuthMode {
+    /// The mode's name, as it appears in configuration and `/api/info`.
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Off => "off",
@@ -29,6 +31,8 @@ impl AuthMode {
         }
     }
 
+    /// Whether any route requires a signed-in user.
+    #[must_use]
     pub fn enabled(self) -> bool {
         self != Self::Off
     }
@@ -36,6 +40,7 @@ impl AuthMode {
 
 #[derive(Debug, Clone, Parser)]
 #[command(name = "senders", about = "End-to-end encrypted file sharing", version)]
+/// Everything the server reads at startup.
 pub struct Config {
     /// Address to listen on.
     #[arg(long, env = "SENDERS_BIND", default_value = "0.0.0.0:8080")]
@@ -90,9 +95,11 @@ pub struct Config {
     pub oidc_issuer: Option<String>,
 
     #[arg(long, env = "SENDERS_OIDC_CLIENT_ID")]
+    /// OIDC client identifier.
     pub oidc_client_id: Option<String>,
 
     #[arg(long, env = "SENDERS_OIDC_CLIENT_SECRET", hide_env_values = true)]
+    /// OIDC client secret, for confidential clients.
     pub oidc_client_secret: Option<String>,
 
     /// Extra scopes to request, comma-separated. `openid` is always included.
@@ -130,6 +137,7 @@ pub struct Config {
 ///
 /// A server bound to the wildcard address is not reachable *at* it on every
 /// platform, so probes go to loopback on the same port.
+#[must_use]
 pub fn probe_address(bind: SocketAddr) -> SocketAddr {
     if bind.ip().is_unspecified() {
         match bind {
@@ -153,6 +161,7 @@ impl Config {
     }
 
     /// Clamp a requested expiry into the configured window.
+    #[must_use]
     pub fn clamp_expiry(&self, requested: Option<u64>) -> u64 {
         let max = self.max_expiry.clamp(MIN_EXPIRY_SECS, MAX_EXPIRY_SECS);
         requested
@@ -161,23 +170,32 @@ impl Config {
     }
 
     /// Clamp a requested download budget into the configured window.
+    #[must_use]
     pub fn clamp_downloads(&self, requested: Option<u32>) -> u32 {
         let max = self.max_downloads.clamp(1, MAX_DOWNLOADS);
         requested.unwrap_or(DEFAULT_MAX_DOWNLOADS).clamp(1, max)
     }
 
+    /// The longest lifetime this server will actually grant.
+    #[must_use]
     pub fn effective_max_expiry(&self) -> u64 {
         self.max_expiry.clamp(MIN_EXPIRY_SECS, MAX_EXPIRY_SECS)
     }
 
+    /// The largest download budget this server will actually grant.
+    #[must_use]
     pub fn effective_max_downloads(&self) -> u32 {
         self.max_downloads.clamp(1, MAX_DOWNLOADS)
     }
 
+    /// The OIDC redirect URI, derived from the public URL.
+    #[must_use]
     pub fn redirect_uri(&self) -> String {
         format!("{}/auth/callback", self.public_url.trim_end_matches('/'))
     }
 
+    /// The email-domain allow-list, lowercased and split.
+    #[must_use]
     pub fn allowed_domains(&self) -> Vec<String> {
         self.oidc_allowed_domains
             .as_deref()

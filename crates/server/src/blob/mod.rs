@@ -10,19 +10,25 @@ pub mod fs;
 #[cfg(feature = "s3")]
 pub mod s3;
 
+/// A stream of ciphertext chunks, in either direction.
 pub type ByteStream = Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + 'static>>;
 
 #[derive(Debug, thiserror::Error)]
+/// Why a blob operation failed.
 pub enum BlobError {
     #[error("blob not found")]
+    /// No object is stored under that id.
     NotFound,
     #[error("upload exceeds the maximum allowed size")]
+    /// The upload exceeded the configured maximum and was discarded.
     TooLarge,
     #[error(transparent)]
+    /// Anything the backend itself reported.
     Other(#[from] anyhow::Error),
 }
 
 #[async_trait::async_trait]
+/// Somewhere ciphertext can be put, fetched and deleted.
 pub trait BlobStore: Send + Sync + 'static {
     /// Stream `body` into storage under `id`, refusing to write more than
     /// `max_size` bytes. Returns the number of bytes stored.
@@ -41,6 +47,7 @@ pub trait BlobStore: Send + Sync + 'static {
     async fn health(&self) -> Result<(), BlobError>;
 }
 
+/// A blob store shared across handlers.
 pub type SharedBlobStore = Arc<dyn BlobStore>;
 
 /// Build a blob store from a URI: `fs:<path>`, `file://<path>`, or

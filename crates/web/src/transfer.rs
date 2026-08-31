@@ -82,12 +82,26 @@ async fn read_slice(blob: &Blob, start: f64, end: f64) -> Result<Vec<u8>> {
 
 /// A file encrypted and ready to upload.
 pub struct SealedFile {
+    /// The ciphertext, ready to be handed to the upload.
     pub blob: Blob,
     /// The URL-fragment secret. Never leaves the browser.
     pub secret: Vec<u8>,
+    /// The keys derived from [`secret`](Self::secret).
     pub keys: FileKeys,
+    /// The STREAM nonce prefix this file was sealed with.
     pub nonce_prefix: Vec<u8>,
+    /// base64url sealed metadata blob, for the upload headers.
     pub metadata: String,
+}
+
+impl std::fmt::Debug for SealedFile {
+    /// Hand-written so the secret cannot reach a log line: it is the whole key.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SealedFile")
+            .field("secret", &"<redacted>")
+            .field("metadata", &self.metadata)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Encrypt `file` under a freshly generated secret.
@@ -100,18 +114,18 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
 
     let blob: &Blob = file.as_ref();
     let size = blob.size();
-    let chunk = CHUNK_SIZE as f64;
+    let chunk = crate::convert::len_to_f64(CHUNK_SIZE);
     // An empty file still gets one empty, authenticated record, so that
     // "zero bytes" is a fact the recipient can verify rather than assume.
     let records = if size == 0.0 {
         1u32
     } else {
-        (size / chunk).ceil() as u32
+        crate::convert::to_u32((size / chunk).ceil())
     };
 
     let mut builder = BlobBuilder::default();
     for index in 0..records {
-        let start = index as f64 * chunk;
+        let start = f64::from(index) * chunk;
         let end = (start + chunk).min(size);
         let plaintext = read_slice(blob, start, end).await?;
         let sealed = keys
@@ -119,7 +133,7 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
             .await
             .map_err(to_error)?;
         builder.push(&sealed)?;
-        on_progress((index + 1) as f64 / records as f64);
+        on_progress(f64::from(index + 1) / f64::from(records));
     }
 
     let metadata = FileMetadata {
@@ -132,7 +146,7 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
                 mime
             }
         },
-        size: size as u64,
+        size: crate::convert::to_u64(size),
     };
     let sealed_metadata = keys
         .seal_metadata(&serde_json::to_vec(&metadata).map_err(to_error)?)
@@ -146,6 +160,15 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
         nonce_prefix,
         metadata: b64::encode(&sealed_metadata),
     })
+}
+
+/// The STREAM counter for record `index`.
+///
+/// The counter is 32 bits, which at 64 KiB records caps a file at 256 TiB —
+/// far beyond any size the server will accept — so this cannot be reached in
+/// practice.
+fn record_index(index: u64) -> u32 {
+    u32::try_from(index).expect("record counts are bounded by the maximum file size")
 }
 
 /// How many ciphertext records make up a body of `cipher_len` bytes.
@@ -205,12 +228,12 @@ pub async fn open_stream(
         while index + 1 < total_records && buffer.len() >= CHUNK_CIPHERTEXT_SIZE {
             let record: Vec<u8> = buffer.drain(..CHUNK_CIPHERTEXT_SIZE).collect();
             let plaintext = keys
-                .open_record(nonce_prefix, index as u32, false, &record)
+                .open_record(nonce_prefix, record_index(index), false, &record)
                 .await
                 .map_err(to_error)?;
             builder.push(&plaintext)?;
             index += 1;
-            on_progress(index as f64 / total_records as f64);
+            on_progress(crate::convert::to_f64(index) / crate::convert::to_f64(total_records));
         }
     }
 
@@ -220,7 +243,7 @@ pub async fn open_stream(
         )));
     }
     let plaintext = keys
-        .open_record(nonce_prefix, index as u32, true, &buffer)
+        .open_record(nonce_prefix, record_index(index), true, &buffer)
         .await
         .map_err(to_error)?;
     builder.push(&plaintext)?;
@@ -247,6 +270,7 @@ pub fn save_blob(blob: &Blob, filename: &str) -> Result<()> {
 
 /// Build the share link. The secret goes in the fragment, which browsers do
 /// not send to servers and which stays out of access logs and `Referer`.
+#[must_use]
 pub fn share_url(origin: &str, id: &str, secret: &[u8]) -> String {
     format!(
         "{}/d/{id}#{}",
@@ -256,6 +280,7 @@ pub fn share_url(origin: &str, id: &str, secret: &[u8]) -> String {
 }
 
 /// Read the secret back out of `location.hash`.
+#[must_use]
 pub fn secret_from_fragment() -> Option<Vec<u8>> {
     let hash = web_sys::window()?.location().hash().ok()?;
     let raw = hash.strip_prefix('#').unwrap_or(&hash);

@@ -53,3 +53,6 @@ reqwest = { version = "0.12", optional = true, default-features = false, feature
 tempfile = "3"
 tower = { version = "0.5", features = ["util"] }
 sha2 = "0.10"
+
+[lints]
+workspace = true

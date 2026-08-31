@@ -61,6 +61,8 @@ pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
     })
 }
 
+/// Assemble the application: API, auth routes, the static frontend, and the
+/// hardening headers that wrap all of them.
 pub fn router(state: AppState) -> Router {
     let static_dir = state.config.static_dir.clone();
     // Unknown paths fall through to the SPA shell so deep links like
@@ -138,12 +140,14 @@ fn inline_scripts(html: &str) -> Vec<&str> {
 /// compromised page from posting plaintext anywhere else.
 fn content_security_policy(index_html: Option<&str>) -> String {
     use base64::Engine as _;
+    use std::fmt::Write as _;
 
     let mut script_src = String::from("'self' 'wasm-unsafe-eval'");
     for script in index_html.map(inline_scripts).unwrap_or_default() {
         let digest = util::sha256(script.as_bytes());
         let encoded = base64::engine::general_purpose::STANDARD.encode(digest);
-        script_src.push_str(&format!(" 'sha256-{encoded}'"));
+        // Writing into the buffer avoids an intermediate allocation per hash.
+        let _ = write!(script_src, " 'sha256-{encoded}'");
     }
 
     format!(
