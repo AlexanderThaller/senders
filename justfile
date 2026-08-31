@@ -1,38 +1,88 @@
 # senders — common tasks.
 #
-# The frontend must be built before the server starts: the server pins the
-# hash of the bundler's inline bootstrap script into its CSP at startup, so a
-# stale `dist` means a blank page.
-
-set dotenv-load := false
-
-wasm_bindgen_test := "wasm-bindgen-test-runner"
+# The native crates build, test, lint and format under Bazel. The wasm frontend
+# does not: it targets wasm32 and needs wasm-bindgen, wasm-opt and asset
+# hashing on top of rustc, which trunk already does (see .bazelrc). So the few
+# recipes that touch crates/web use trunk and cargo directly, and everything
+# else goes through Bazel.
+#
+# Ordering matters in one place: the server pins the hash of trunk's inline
+# bootstrap script into its Content-Security-Policy at startup, so the frontend
+# must be built before the server runs or the page is blocked.
 
 default:
     @just --list
+
+# --- frontend (trunk) --------------------------------------------------------
 
 # Build the wasm frontend into ./dist.
 web:
     trunk build
 
+# Build the wasm frontend, optimised.
 web-release:
     trunk build --release
 
-# Build the server.
+# --- native crates (bazel) ---------------------------------------------------
+
+# Build just the server binary.
 server:
-    cargo build -p senders-server
+    bazel build //crates/server:senders
 
-# Everything, release profile.
+# Everything, optimised.
 build: web-release
-    cargo build --release -p senders-server
+    bazel build -c opt //crates/server:senders
 
-# Run locally with no external dependencies: files on disk, metadata in memory.
+# Lints and format checks are ordinary Bazel targets, so none of them
+# discards another's analysis cache.
+
+# Build, tests, clippy and rustfmt in one invocation.
+test:
+    bazel test //...
+
+# Clippy on its own.
+lint:
+    bazel build //crates/proto:clippy //crates/server:clippy
+
+# Format check on its own.
+fmt-check:
+    bazel test //crates/proto:rustfmt //crates/server:rustfmt
+
+# rules_rust ships an apply tool for the targets it knows about; crates/web is
+# outside the Bazel build, so cargo formats that one.
+
+# Reformat in place.
+fmt:
+    bazel run @rules_rust//tools/rustfmt
+    cd crates/web && cargo fmt --all
+
+# --- frontend tests (cargo, wasm32) ------------------------------------------
+
+# Needs wasm-bindgen-test-runner on PATH, at the same version as the
+# wasm-bindgen dependency.
+
+# Browser-crypto tests, under Node against the compiled wasm.
+test-wasm:
+    cd crates/web && cargo test --target wasm32-unknown-unknown
+
+# Everything, both toolchains.
+test-all: test test-wasm
+
+# What CI should run.
+ci: test-all
+
+# --- running -----------------------------------------------------------------
+
+# Absolute paths because `bazel run` executes from the runfiles tree, not from
+# the workspace root.
+
+# Run locally with no external dependencies: blobs on disk, metadata in memory.
 dev: web
-    SENDERS_STORAGE=fs:./data/blobs \
-    SENDERS_METADATA=memory: \
-    SENDERS_STATIC_DIR=./dist \
-    SENDERS_BIND=127.0.0.1:47920 \
-    cargo run -p senders-server
+    bazel run //crates/server:senders -- \
+        --bind 127.0.0.1:47920 \
+        --storage fs:{{ justfile_directory() }}/data/blobs \
+        --metadata memory: \
+        --static-dir {{ justfile_directory() }}/dist
 
 # Run against the containerised Dragonfly + Garage stack.
 dev-stack: web
@@ -42,49 +92,13 @@ dev-stack: web
     [ -f deploy/garage.env ] || ./scripts/init-garage.sh
     set -a; . ./deploy/garage.env; set +a
     export AWS_REGION=garage AWS_ENDPOINT_URL=http://127.0.0.1:47922 SENDERS_S3_PATH_STYLE=true
-    SENDERS_STORAGE=s3://senders \
-    SENDERS_METADATA=redis://127.0.0.1:47921 \
-    SENDERS_STATIC_DIR=./dist \
-    SENDERS_BIND=127.0.0.1:47920 \
-    cargo run -p senders-server
+    bazel run //crates/server:senders -- \
+        --bind 127.0.0.1:47920 \
+        --storage s3://senders \
+        --metadata redis://127.0.0.1:47921 \
+        --static-dir "$PWD/dist"
 
-# Bring the local dependency containers up / down.
-stack-up:
-    docker compose up -d dragonfly garage
-    ./scripts/init-garage.sh
-
-stack-down:
-    docker compose down -v
-
-# Server and shared-crate tests.
-test:
-    cargo test --workspace
-
-# Browser-crypto tests, run under Node against the compiled wasm.
-test-wasm:
-    cd crates/web && cargo test --target wasm32-unknown-unknown
-
-# Everything.
-test-all: test test-wasm
-
-lint:
-    cargo clippy --workspace --all-targets -- -D warnings
-    cd crates/web && cargo clippy --target wasm32-unknown-unknown --all-targets -- -D warnings
-
-fmt:
-    cargo fmt --all
-    cd crates/web && cargo fmt --all
-
-fmt-check:
-    cargo fmt --all -- --check
-    cd crates/web && cargo fmt --all -- --check
-
-# What CI should run.
-ci: fmt-check lint test-all
-
-# The Bazel build covers the native crates only; the frontend stays with trunk.
-bazel:
-    bazel test //...
+# --- containers --------------------------------------------------------------
 
 # -c opt matters: a fastbuild binary carries debug info and roughly doubles the
 # image. Bazel packages ./dist, it does not produce it, hence web-release.
@@ -93,5 +107,11 @@ bazel:
 image: web-release
     bazel run -c opt //deploy:image_load
 
-bazel-clippy:
-    bazel build //crates/server:clippy //crates/proto:clippy
+# Bring the dependency containers up, with a one-time Garage setup.
+stack-up:
+    docker compose up -d dragonfly garage
+    ./scripts/init-garage.sh
+
+# Tear the dependency containers down, discarding their volumes.
+stack-down:
+    docker compose down -v
