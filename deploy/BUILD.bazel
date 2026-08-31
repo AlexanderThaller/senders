@@ -1,4 +1,4 @@
-load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load", "oci_push")
 load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "strip_prefix")
 load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
 
@@ -49,6 +49,16 @@ oci_image(
         "SENDERS_LOG": "info,tower_http=warn",
     },
     exposed_ports = ["8080/tcp"],
+    # `image.source` is what makes GHCR attach the package to this repository;
+    # the rest is what `docker inspect` shows. These are static: a stamped
+    # revision label would make every build non-deterministic for the sake of
+    # information `git describe` already puts in the tag.
+    labels = {
+        "org.opencontainers.image.title": "senders",
+        "org.opencontainers.image.description": "End-to-end encrypted file sharing",
+        "org.opencontainers.image.source": "https://github.com/athaller/senders",
+        "org.opencontainers.image.licenses": "MIT",
+    },
     tars = [
         ":server_layer",
         ":frontend_layer",
@@ -64,5 +74,22 @@ oci_load(
     name = "image_load",
     image = ":image",
     repo_tags = ["senders:latest"],
+    visibility = ["//visibility:public"],
+)
+
+# `bazel run //deploy:image_push -- --tag <tag>` pushes to the registry.
+#
+# The repository here is the default; CI overrides it with
+# `--repository ghcr.io/<owner>/<repo>` so a fork publishes to its own
+# namespace rather than trying to write to this one. Tags are passed at run
+# time for the same reason -- they depend on the ref being built.
+#
+# Push authenticates through the ambient docker credentials: `docker login
+# ghcr.io` locally, or docker/login-action in CI. crane reads the same
+# ~/.docker/config.json.
+oci_push(
+    name = "image_push",
+    image = ":image",
+    repository = "ghcr.io/athaller/senders",
     visibility = ["//visibility:public"],
 )

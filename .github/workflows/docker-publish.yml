@@ -1,0 +1,170 @@
+name: Docker
+
+# Builds the container image with Bazel (//deploy:image) and pushes it to the
+# GitHub Container Registry. There is no Dockerfile: the image is defined once,
+# in deploy/BUILD.bazel.
+
+on:
+  # Rebuild weekly so the distroless base picks up security updates even when
+  # nothing in this repository changes.
+  schedule:
+    - cron: '17 5 * * 1'
+  push:
+    branches: [ "main" ]
+    # Publish semver tags as releases. Tags in this repo have no `v` prefix.
+    tags: [ '*.*.*' ]
+  pull_request:
+    branches: [ "main" ]
+  release:
+    types: [ "published" ]
+
+env:
+  REGISTRY: ghcr.io
+  TRUNK_VERSION: '0.21.14'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      # For the keyless signing identity challenge against sigstore/fulcio.
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          # Full history and tags so `git describe` below finds the nearest tag
+          # instead of falling back to the bare commit.
+          fetch-depth: 0
+
+      # https://github.com/sigstore/cosign-installer
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 # v3.5.0
+        with:
+          cosign-release: 'v2.2.4'
+
+      # The bazelisk, repository and external caches are keyed independently of
+      # the workflow, so the expensive parts -- the Rust toolchain and the
+      # materialised external repos -- are shared with the Bazel workflow. Only
+      # the disk cache of action outputs is per-workflow, which is what we want:
+      # this one builds --config=deploy and would otherwise thrash against the
+      # fastbuild outputs the test workflow stores.
+      - name: Set up Bazel with caching
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-cache: true
+          repository-cache: true
+          external-cache: true
+          disk-cache: ${{ github.workflow }}
+          cache-save: ${{ github.event_name != 'pull_request' }}
+
+      # Bazel packages ./dist, it does not produce it: crates/web targets wasm32
+      # and trunk owns that pipeline. //:frontend globs with allow_empty=False,
+      # so if this step were missing the image build would fail at analysis time
+      # rather than publish an image that serves nothing.
+      - name: Install the wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Cache cargo registry and frontend build outputs
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            crates/web/target
+          key: frontend-${{ runner.os }}-${{ hashFiles('crates/web/Cargo.lock') }}
+          restore-keys: frontend-${{ runner.os }}-
+
+      # The archive holds a bare `trunk` binary at its root, so no
+      # --strip-components here.
+      - name: Install trunk
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.local/bin"
+          curl -sSfL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+            | tar -xzf - -C "$HOME/.local/bin"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Build the frontend
+        run: trunk build --release
+
+      # --config=deploy matches [profile.deploy]: LTO, one codegen unit,
+      # panic=abort.
+      #
+      # Deliberately NOT --config=x86-64-v3, unlike `just image`. A published
+      # image can land on any host, and a binary built for x86-64-v3 dies with
+      # SIGILL on anything older than Haswell. Local builds can afford that
+      # assumption; something in a public registry cannot.
+      - name: Build the image
+        run: bazel build --lockfile_mode=error --config=deploy //deploy:image
+
+      # A fork should publish into its own namespace, and GHCR rejects
+      # uppercase, which GitHub owner names may contain.
+      - name: Determine image repository and tags
+        id: meta
+        run: |
+          set -euo pipefail
+          repository="${REGISTRY}/$(echo "${GITHUB_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          echo "repository=${repository}" >> "$GITHUB_OUTPUT"
+
+          # Always a content-addressed tag, so a specific build can be pulled
+          # without waiting for a release.
+          tags="sha-${GITHUB_SHA:0:12} $(git describe --always --tags)"
+          case "${GITHUB_REF}" in
+            refs/tags/*) tags="${tags} ${GITHUB_REF_NAME} latest" ;;
+            refs/heads/main) tags="${tags} main latest" ;;
+          esac
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Will tag: ${tags}"
+
+      # https://github.com/docker/login-action
+      # crane, which rules_oci shells out to, reads the same
+      # ~/.docker/config.json this writes.
+      - name: Log into ${{ env.REGISTRY }}
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@343f7c4344506bcbf9b4de18042ae17996df046d # v3.0.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # oci_push pushes by digest first and then applies each --tag, so the
+      # tags always point at exactly the artifact that was built.
+      - name: Push the image
+        if: github.event_name != 'pull_request'
+        env:
+          REPOSITORY: ${{ steps.meta.outputs.repository }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          args=(--repository "${REPOSITORY}")
+          for tag in ${TAGS}; do
+            args+=(--tag "${tag}")
+          done
+          bazel run --lockfile_mode=error --config=deploy //deploy:image_push -- "${args[@]}"
+
+      # The digest comes from the image Bazel built, not from the registry, so
+      # what gets signed is what was produced here.
+      - name: Determine the pushed digest
+        if: github.event_name != 'pull_request'
+        id: digest
+        run: |
+          set -euo pipefail
+          image_dir=$(bazel cquery --config=deploy --output=files //deploy:image | head -1)
+          digest=$(jq -r '.manifests[0].digest' "${image_dir}/index.json")
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "Signed digest: ${digest}"
+
+      # Keyless signing via an ephemeral certificate from the sigstore
+      # community Fulcio instance. This writes to the public Rekor transparency
+      # log, which is only appropriate while the package is public.
+      # https://github.com/sigstore/cosign
+      - name: Sign the published image
+        if: github.event_name != 'pull_request'
+        env:
+          REPOSITORY: ${{ steps.meta.outputs.repository }}
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign sign --yes "${REPOSITORY}@${DIGEST}"

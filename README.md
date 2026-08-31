@@ -327,6 +327,38 @@ top of rustc, all of which trunk already does. Run `trunk build --release`
 before serving; there is no Bazel equivalent, and `crates/web` is listed in
 `.bazelignore`.
 
+### Continuous integration
+
+Two workflows, both in `.github/workflows`:
+
+- **Bazel** — `bazel test --lockfile_mode=error //...` covers build, tests,
+  clippy and rustfmt in one invocation. `--lockfile_mode=error` means a stale
+  committed `MODULE.bazel.lock` fails here instead of being silently
+  regenerated. A second job covers `crates/web` with cargo, because Bazel does
+  not build it and the browser cryptography would otherwise go untested and
+  unlinted.
+- **Docker** — builds `//deploy:image` and pushes it to GHCR, then signs it
+  with cosign. Also runs weekly, so the distroless base picks up security
+  updates even when nothing here changes. Pull requests build but do not push.
+
+Both use `bazel-contrib/setup-bazel` for caching. The bazelisk, repository and
+external caches are keyed independently of the workflow, so the expensive
+parts — the Rust toolchain and the materialised external repos — are shared
+between the two; only the per-workflow disk cache of action outputs is separate,
+since one builds fastbuild and the other `--config=deploy`.
+
+The published image is built **without** `--config=x86-64-v3`, unlike
+`just image`. A local build can assume the machine it was built on; something
+in a public registry cannot, and an x86-64-v3 binary dies with SIGILL on
+anything older than Haswell.
+
+```sh
+docker pull ghcr.io/athaller/senders:latest
+cosign verify ghcr.io/athaller/senders:latest \
+  --certificate-identity-regexp 'https://github\.com/athaller/senders/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
 ### Localisation
 
 The interface is available in English and German and follows the browser's
