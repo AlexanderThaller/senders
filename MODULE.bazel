@@ -51,7 +51,42 @@ oci.pull(
 )
 use_repo(oci, "distroless_cc", "distroless_cc_linux_amd64")
 
+# Build AWS-LC with Bazel instead of through aws-lc-sys' build script.
+#
+# rules_rs prints a warning recommending this, and it is worth taking: the
+# build script drives cc-rs, which compiles a few thousand C files in the
+# sandbox and bakes the sandbox path into the DWARF it emits. That path
+# contains a generation counter that changes on every execution, so the outputs
+# are not reproducible between machines -- or between two checkouts on one
+# machine -- and a shared cache cannot be hit. Under Bazel's own cc rules the
+# same sources become ordinary cached actions.
+#
+# `rustc_flags` and the additive BUILD file come from
+# @rules_rs//3rd_party/aws-lc-sys:include.MODULE.bazel verbatim; only the hub
+# repository in `deps` is ours (the snippet writes it as a placeholder).
+bazel_dep(name = "aws-lc", version = "5.1.0.bcr.2")
+
+rules_rust_bindgen = use_extension("@rules_rs//rs:rules_rust_bindgen.bzl", "rules_rust_bindgen")
+use_repo(rules_rust_bindgen, "rules_rust_bindgen")
+
+register_toolchains("@rules_rust_bindgen//:all")
+
 crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.annotation(
+    crate = "aws-lc-rs",
+    gen_build_script = "off",
+)
+crate.annotation(
+    additive_build_file = "@rules_rs//3rd_party/aws-lc-sys:additive.BUILD.bazel",
+    crate = "aws-lc-sys",
+    extra_aliased_targets = {"aws_lc_sys_build_info": "aws_lc_sys_build_info"},
+    gen_build_script = "off",
+    rustc_flags = ["--cfg=use_bindgen_pregenerated"],
+    deps = ["@crates//:aws_lc_sys_build_info"],
+)
+
+inject_repo(crate, "aws-lc")
+
 crate.from_cargo(
     name = "crates",
     cargo_lock = "//:Cargo.lock",
