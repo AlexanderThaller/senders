@@ -1,0 +1,21 @@
+# Minimal single-node Garage, for local development only.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+
+replication_factor = 1
+
+rpc_bind_addr = "[::]:3901"
+rpc_public_addr = "127.0.0.1:3901"
+# Development-only secret. Generate a fresh one for anything real:
+#   openssl rand -hex 32
+rpc_secret = "3d6b1a0c7e5f48a29b0d7c1e4f8a2b6d5c3e9f0a1b2c3d4e5f60718293a4b5c6"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+root_domain = ".s3.garage.localhost"
+
+[admin]
+api_bind_addr = "[::]:3903"
+admin_token = "dev-admin-token"

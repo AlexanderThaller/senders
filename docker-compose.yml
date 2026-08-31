@@ -1,0 +1,62 @@
+# Local stack: Dragonfly for metadata, Garage for S3-compatible blob storage.
+#
+#   docker compose up -d dragonfly garage   # dependencies only, for `just dev`
+#   ./scripts/init-garage.sh                # one-time bucket + key setup
+#   docker compose up -d                    # the whole thing, on :47920
+services:
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    command: ["--logtostderr", "--default_lua_flags=allow-undeclared-keys"]
+    ulimits:
+      memlock: -1
+    ports:
+      # High host ports, so the stack does not fight a local Redis/MinIO.
+      - "47921:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-h", "127.0.0.1", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  garage:
+    image: dxflrs/garage:v1.0.1
+    volumes:
+      - ./deploy/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    ports:
+      - "47922:3900"
+      - "47923:3903"
+
+  senders:
+    build: .
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+      garage:
+        condition: service_started
+    ports:
+      - "47920:8080"
+    env_file:
+      # Written by ./scripts/init-garage.sh; absent until you run it.
+      - path: deploy/garage.env
+        required: false
+    environment:
+      SENDERS_METADATA: redis://dragonfly:6379
+      SENDERS_STORAGE: s3://senders
+      SENDERS_S3_PATH_STYLE: "true"
+      SENDERS_PUBLIC_URL: http://localhost:47920
+      AWS_ENDPOINT_URL: http://garage:3900
+      AWS_REGION: garage
+      # Uploading requires a login when this is `upload`; `all` hides
+      # downloads too. See the README for the OIDC settings it needs.
+      SENDERS_AUTH_MODE: "off"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q 200"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  garage-meta:
+  garage-data:
