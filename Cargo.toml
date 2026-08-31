@@ -1,0 +1,18 @@
+[workspace]
+resolver = "3"
+members = ["crates/proto", "crates/server"]
+# The Leptos frontend is built for wasm32 by `trunk` and keeps its own lockfile,
+# so it stays out of the native workspace to avoid feature unification with tokio.
+exclude = ["crates/web"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/athaller/senders"
+
+[workspace.dependencies]
+senders-proto = { path = "crates/proto" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+base64 = "0.22"

@@ -1,0 +1,12 @@
+/target
+/crates/web/target
+/crates/web/dist
+/dist
+/data
+.env
+
+# Bazel's convenience symlinks at the workspace root.
+/bazel-*
+
+# Written by scripts/init-garage.sh; contains local S3 credentials.
+/deploy/garage.env
