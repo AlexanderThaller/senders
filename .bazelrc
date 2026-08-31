@@ -1,0 +1,25 @@
+# Lint and format configuration, set unconditionally rather than behind a
+# --config.
+#
+# This is the point of the arrangement. If clippy and rustfmt lived under their
+# own --config, checking them would mean a separate bazel invocation, and every
+# flip of a build setting discards Bazel's analysis cache -- so each run would
+# re-analyse the whole graph to re-check work the previous one had already
+# done. A build setting that never changes never invalidates anything, so
+# clippy and rustfmt are ordinary targets (see rust_clippy / rustfmt_test in
+# the BUILD files) covered by the same `bazel test //...` as everything else.
+build --@rules_rust//rust/settings:clippy_flag=-Dwarnings
+
+# There is deliberately no clippy.toml / rustfmt.toml label_flag here. This
+# repo has neither file: the lint set is whatever clippy warns about by default
+# promoted to an error by -Dwarnings, and formatting is stock rustfmt, which is
+# exactly what `cargo fmt` and `cargo clippy` do. Adding the flags without the
+# files would only invite the two builds to drift apart.
+
+# The frontend is NOT part of the Bazel build. crates/web targets
+# wasm32-unknown-unknown and needs wasm-bindgen, wasm-opt and asset hashing on
+# top of rustc, which trunk already does; reproducing that here would duplicate
+# a working pipeline for no gain. Run `trunk build --release` before serving.
+
+build --verbose_failures
+test --test_output=errors

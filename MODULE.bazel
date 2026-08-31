@@ -1,0 +1,41 @@
+"""senders -- end-to-end encrypted file sharing."""
+
+module(
+    name = "senders",
+    version = "0.1.0",
+)
+
+bazel_dep(name = "rules_rs", version = "0.0.107")
+
+toolchains = use_extension("@rules_rs//rs/toolchains:module_extension.bzl", "toolchains")
+toolchains.toolchain(
+    edition = "2024",
+    version = "1.98.0",
+)
+use_repo(toolchains, "default_rust_toolchains")
+
+register_toolchains("@default_rust_toolchains//...")
+
+# Exposes rules_rs' patched rules_rust as @rules_rust, so the
+# @rules_rust//rust/settings:* flags used in .bazelrc can be named from the
+# command line.
+rules_rust = use_extension("@rules_rs//rs:rules_rust.bzl", "rules_rust")
+use_repo(rules_rust, "rules_rust")
+
+# Dependencies, edition and lint configuration come from the Cargo manifests,
+# so adding a crate needs no BUILD.bazel change. Cargo.lock stays the source of
+# truth for versions; MODULE.bazel.lock records the resolved set.
+#
+# This reads the workspace root manifest, which covers crates/proto and
+# crates/server. crates/web is a separate Cargo workspace built by trunk.
+crate = use_extension("@rules_rs//rs:extensions.bzl", "crate")
+crate.from_cargo(
+    name = "crates",
+    cargo_lock = "//:Cargo.lock",
+    cargo_toml = "//:Cargo.toml",
+    generate_lint_config = True,
+    platform_triples = [
+        "x86_64-unknown-linux-gnu",
+    ],
+)
+use_repo(crate, "crates")

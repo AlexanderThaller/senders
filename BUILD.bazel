@@ -1,0 +1,6 @@
+# The Cargo manifests are the source of truth for dependencies, edition and
+# lints; MODULE.bazel's crate.from_cargo reads them through these labels.
+exports_files([
+    "Cargo.toml",
+    "Cargo.lock",
+])

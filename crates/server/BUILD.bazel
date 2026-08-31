@@ -1,0 +1,106 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "edition", "lint_config")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_clippy", "rustfmt_test")
+
+# The crate's default features, restated because rules_rust takes first-party
+# feature flags explicitly. Keep in step with [features] in Cargo.toml: `s3`
+# pulls in the AWS SDK blob store, `oidc` the OpenID Connect login routes, and
+# src/ is #[cfg]-gated on both.
+FEATURES = [
+    "default",
+    "oidc",
+    "s3",
+]
+
+# all_crate_deps resolves the senders-proto path dependency to
+# //crates/proto:proto on its own; it does not need naming here.
+DEPS = all_crate_deps(normal = True)
+
+TEST_DEPS = all_crate_deps(
+    normal = True,
+    normal_dev = True,
+)
+
+rust_library(
+    name = "senders_server",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/main.rs"],
+    ),
+    aliases = aliases(),
+    crate_features = FEATURES,
+    edition = edition(),
+    lint_config = lint_config(),
+    visibility = ["//visibility:public"],
+    deps = DEPS,
+)
+
+rust_binary(
+    name = "senders",
+    srcs = ["src/main.rs"],
+    aliases = aliases(),
+    crate_features = FEATURES,
+    edition = edition(),
+    lint_config = lint_config(),
+    visibility = ["//visibility:public"],
+    deps = DEPS + [":senders_server"],
+)
+
+# Unit tests living inside the library.
+rust_test(
+    name = "senders_server_test",
+    size = "small",
+    aliases = aliases(),
+    crate = ":senders_server",
+    crate_features = FEATURES,
+    edition = edition(),
+    lint_config = lint_config(),
+    deps = TEST_DEPS,
+)
+
+# Integration tests. Each tests/ file is its own crate, so each gets a target.
+[
+    rust_test(
+        name = name + "_test",
+        size = "small",
+        srcs = ["tests/" + name + ".rs"],
+        aliases = aliases(),
+        crate_features = FEATURES,
+        edition = edition(),
+        lint_config = lint_config(),
+        deps = TEST_DEPS + [":senders_server"],
+    )
+    for name in [
+        "api",
+        "auth",
+    ]
+]
+
+# Clippy and rustfmt as ordinary targets rather than aspects behind a
+# --config, so one `bazel test //...` covers build, test, lint and format
+# without any invocation discarding another's analysis cache.
+#
+# The list includes the tests on purpose: `cargo clippy --all-targets` checks
+# them, and test code is where sloppy lints tend to hide.
+ALL_TARGETS = [
+    ":senders_server",
+    ":senders",
+    ":senders_server_test",
+    ":api_test",
+    ":auth_test",
+]
+
+# testonly because it depends on the test targets.
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    deps = ALL_TARGETS,
+)
+
+rustfmt_test(
+    name = "rustfmt",
+    size = "small",
+    targets = ALL_TARGETS,
+)

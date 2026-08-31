@@ -1,0 +1,20 @@
+# Directories Bazel must not descend into when expanding //....
+#
+# Bazel ignores its own bazel-* convenience symlinks at the workspace root but
+# not ones further down, and .gitignore is not consulted during package
+# loading, so anything large or foreign has to be named here.
+
+# Cargo build directories. No BUILD files, just a lot of bytes to glob.
+target
+crates/web/target
+
+# The Leptos frontend is its own Cargo workspace, built for wasm32 by trunk
+# (which also runs wasm-opt and hashes the assets). Bazel builds the native
+# crates only; see the note in .bazelrc.
+crates/web
+
+# Build output and runtime data.
+dist
+data
+
+.claude

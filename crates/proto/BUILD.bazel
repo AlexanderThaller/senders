@@ -1,0 +1,51 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "edition", "lint_config")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_clippy", "rustfmt_test")
+
+# Wire types and crypto parameters shared by the server and the wasm frontend.
+# The frontend consumes this crate through Cargo, not Bazel.
+# Named for the directory, because that is how rules_rs resolves the
+# `senders-proto` path dependency from the other manifests: it looks for
+# //crates/proto:proto. `crate_name` keeps `use senders_proto::...` working.
+rust_library(
+    name = "proto",
+    srcs = glob(["src/**/*.rs"]),
+    aliases = aliases(),
+    crate_name = "senders_proto",
+    edition = edition(),
+    lint_config = lint_config(),
+    visibility = ["//visibility:public"],
+    deps = all_crate_deps(normal = True),
+)
+
+rust_test(
+    name = "senders_proto_test",
+    size = "small",
+    aliases = aliases(),
+    crate = ":proto",
+    edition = edition(),
+    lint_config = lint_config(),
+    deps = all_crate_deps(
+        normal = True,
+        normal_dev = True,
+    ),
+)
+
+ALL_TARGETS = [
+    ":proto",
+    ":senders_proto_test",
+]
+
+# testonly because it depends on the test target.
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    deps = ALL_TARGETS,
+)
+
+rustfmt_test(
+    name = "rustfmt",
+    size = "small",
+    targets = ALL_TARGETS,
+)
