@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: senders
+spec:
+  template:
+    spec:
+      containers:
+        - name: senders
+          # Restated in full because envFrom has no merge key: the point is
+          # `optional: false`. In production a missing Secret must stop the pod,
+          # not start one that signs sessions with a random per-pod key and
+          # logs people out whenever they hit a different replica.
+          envFrom:
+            - configMapRef:
+                name: senders-config
+            - secretRef:
+                name: senders-secrets
+                optional: false

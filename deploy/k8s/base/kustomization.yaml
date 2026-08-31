@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - deployment.yaml
+  - poddisruptionbudget.yaml
+  - service.yaml
+
+labels:
+  - includeSelectors: true
+    pairs:
+      app.kubernetes.io/name: senders
+      app.kubernetes.io/component: server
+
+images:
+  - name: ghcr.io/athaller/senders
+    newTag: latest
+
+# Generated rather than a plain resource so the name carries a content hash and
+# the Deployment's reference is rewritten with it. A config change then rolls
+# the pods; a plain ConfigMap would be updated in place and only reach pods that
+# happened to restart later. Overlays merge into this with `behavior: merge`.
+configMapGenerator:
+  - name: senders-config
+    envs:
+      - config.env

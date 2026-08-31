@@ -1,0 +1,43 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: senders
+
+resources:
+  - ../../base
+  - ingress.yaml
+  - namespace.yaml
+
+patches:
+  - path: deployment-patch.yaml
+
+replicas:
+  - name: senders
+    count: 3
+
+images:
+  - name: ghcr.io/athaller/senders
+    # Pin a digest or a release tag here. `latest` gives you whatever the last
+    # push produced, and nothing tells the Deployment it changed.
+    newTag: latest
+
+configMapGenerator:
+  - name: senders-config
+    behavior: merge
+    literals:
+      - SENDERS_METADATA=redis://dragonfly.senders.svc.cluster.local:6379
+      - SENDERS_STORAGE=s3://senders
+      # Must match the Ingress host: it is what the OIDC redirect URI is built
+      # from.
+      - SENDERS_PUBLIC_URL=https://senders.example.com
+      - AWS_REGION=eu-central-1
+      # Uncomment for MinIO, Garage, Ceph and anything else that does not do
+      # virtual-host-style addressing.
+      # - AWS_ENDPOINT_URL=https://s3.example.com
+      # - SENDERS_S3_PATH_STYLE=true
+
+# The generator appends a content hash to the ConfigMap name and rewrites the
+# reference, so a config change rolls the Deployment instead of quietly
+# applying to new pods only.
+generatorOptions:
+  disableNameSuffixHash: false

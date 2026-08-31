@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: senders
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: senders
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: senders
+    spec:
+      # Long enough for an in-flight download to finish. axum stops accepting
+      # new connections on SIGTERM and drains the rest, so this is the cap on
+      # how long a large transfer may survive a rollout before it is killed.
+      # Raising it slows every rollout by the same amount.
+      terminationGracePeriodSeconds: 120
+
+      securityContext:
+        runAsNonRoot: true
+        # The `nonroot` account in the distroless base.
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: senders
+
+      containers:
+        - name: senders
+          image: ghcr.io/athaller/senders:latest
+          ports:
+            - name: http
+              containerPort: 8080
+
+          envFrom:
+            - configMapRef:
+                name: senders-config
+            # Session signing key, S3 credentials, OIDC client secret. Optional
+            # here so the single-node overlay runs without one; production
+            # makes it required. See deploy/k8s/README.md.
+            - secretRef:
+                name: senders-secrets
+                optional: true
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+
+          # Liveness asks for the SPA shell, which is served from the image and
+          # touches no dependency. Readiness asks /healthz, which probes both
+          # Redis and object storage.
+          #
+          # Deliberately not the same endpoint for both: if /healthz drove
+          # liveness, a Redis blip would restart every pod at once instead of
+          # just taking them out of rotation until it passed again.
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          # The server connects to Redis during start-up and exits if it cannot,
+          # so a cold cluster shows CrashLoopBackOff until Redis is up. That is
+          # intended: a pod that cannot reach its metadata store has nothing to
+          # serve.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 3
+            failureThreshold: 20
+
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              # S3 uploads buffer 8 MiB per part, and encryption is streamed in
+              # 64 KiB records, so memory scales with concurrent uploads rather
+              # than with file size.
+              memory: 512Mi
+              # No CPU limit on purpose: throttling a streaming transfer shows
+              # up as a stalled download, and the request above is what the
+              # scheduler needs.
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # The root filesystem is read-only; nothing should need this with S3
+        # storage, but the AWS SDK is not documented to be tmp-free.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

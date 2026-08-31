@@ -1,0 +1,46 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# One pod, blobs on a volume, metadata in memory. For trying the service out
+# without standing up Redis and object storage first.
+#
+# Two things this gives up, both of which are why it is not the production
+# overlay: share links do not survive a restart, because the metadata store is
+# in the process; and it cannot be scaled past one replica, because a second
+# pod would know nothing about the first one's links and would serve 404s for
+# them.
+
+namespace: senders-eval
+
+resources:
+  - ../../base
+  - namespace.yaml
+  - pvc.yaml
+
+patches:
+  - path: deployment-patch.yaml
+  # A PodDisruptionBudget requiring one available pod out of one blocks every
+  # voluntary eviction, so node drains hang. Drop it rather than keep a budget
+  # that cannot be satisfied.
+  - target:
+      kind: PodDisruptionBudget
+      name: senders
+    patch: |
+      $patch: delete
+      apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      metadata:
+        name: senders
+
+replicas:
+  - name: senders
+    count: 1
+
+configMapGenerator:
+  - name: senders-config
+    behavior: merge
+    literals:
+      # Quoted: a bare `memory:` ends the scalar and YAML reads the whole entry
+      # as a mapping key instead of a literal.
+      - "SENDERS_METADATA=memory:"
+      - "SENDERS_STORAGE=fs:/data/blobs"

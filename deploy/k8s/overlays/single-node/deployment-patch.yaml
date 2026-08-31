@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: senders
+spec:
+  # RollingUpdate would deadlock: a ReadWriteOnce volume cannot attach to the
+  # new pod while the old one still holds it. Recreate accepts a gap in service
+  # instead, which is the honest trade for a single-replica deployment.
+  strategy:
+    type: Recreate
+  template:
+    spec:
+      containers:
+        - name: senders
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi
+        - name: data
+          persistentVolumeClaim:
+            claimName: senders-data

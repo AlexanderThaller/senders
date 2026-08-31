@@ -1,0 +1,45 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: senders
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+
+    # TLS is not optional for this application. WebCrypto is only exposed in a
+    # secure context, so over plain HTTP the page loads and then fails to
+    # generate a key: everything except localhost must be HTTPS.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+
+    # No request body limit. The default is 1 MiB, which rejects essentially
+    # every upload. Keep this at least as large as SENDERS_MAX_FILE_SIZE, or
+    # set 0 for unlimited and let the server enforce its own limit -- it
+    # returns a clean 413 where the ingress returns an opaque one.
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+
+    # Do not buffer the request. With buffering on, nginx writes the whole
+    # upload to its own disk before contacting the pod, which defeats the
+    # streaming upload path, delays the response by the length of the transfer,
+    # and can fill the controller's disk.
+    nginx.ingress.kubernetes.io/proxy-request-buffering: "off"
+
+    # Large transfers over slow links are one long-lived request. The defaults
+    # (60s) cut them off mid-file.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - senders.example.com
+      secretName: senders-tls
+  rules:
+    - host: senders.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: senders
+                port:
+                  name: http

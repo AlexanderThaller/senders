@@ -432,6 +432,14 @@ Notes on the layout:
   package *load* time, so that version broke every `bazel … //...` rather than
   only the image build.)
 
+## Kubernetes
+
+Kustomize manifests are in `deploy/k8s` — a base plus a production overlay
+(Redis, S3, three replicas, TLS ingress) and a single-node overlay for trying it
+out. See `deploy/k8s/README.md`; the short version is that TLS is mandatory
+because WebCrypto needs a secure context, and the ingress needs
+`proxy-body-size: 0` and `proxy-request-buffering: off` or uploads break.
+
 ## Licence
 
 MIT.
