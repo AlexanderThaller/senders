@@ -27,16 +27,46 @@ pkg_tar(
     srcs = [":server_files"],
 )
 
+# From here down, everything depends on ./dist, which Bazel packages but does
+# not build, so all of it is tagged `manual` and stays out of `//...`. That is
+# what keeps `bazel test //...` working on a tree where trunk has never run.
+# Build these by label: `bazel build //deploy:image`, or `just image`.
+
+# Fails the build, with an actionable message, when ./dist is empty.
+#
+# The check has to happen here rather than as `allow_empty = False` on the glob:
+# a glob is evaluated when its package is LOADED, so that version broke every
+# `bazel … //...` instead of only the image build. This emits an empty tar
+# merged into the frontend layer through pkg_tar's `deps`, so it adds no file
+# and no layer -- the image digest is unchanged by its presence.
+genrule(
+    name = "frontend_guard",
+    srcs = ["//:frontend"],
+    outs = ["frontend_guard.tar"],
+    cmd = """
+if [ -z "$(SRCS)" ]; then
+  echo "ERROR: ./dist is empty. Bazel packages the frontend but does not build" >&2
+  echo "       it. Run 'trunk build --release' first, or use 'just image'." >&2
+  exit 1
+fi
+tar -cf $@ -T /dev/null
+""",
+    tags = ["manual"],
+)
+
 pkg_files(
     name = "frontend_files",
     srcs = ["//:frontend"],
     prefix = "/srv/dist",
     strip_prefix = strip_prefix.from_root("dist"),
+    tags = ["manual"],
 )
 
 pkg_tar(
     name = "frontend_layer",
     srcs = [":frontend_files"],
+    tags = ["manual"],
+    deps = [":frontend_guard"],
 )
 
 oci_image(
@@ -59,6 +89,7 @@ oci_image(
         "org.opencontainers.image.source": "https://github.com/athaller/senders",
         "org.opencontainers.image.licenses": "MIT",
     },
+    tags = ["manual"],
     tars = [
         ":server_layer",
         ":frontend_layer",
@@ -74,6 +105,7 @@ oci_load(
     name = "image_load",
     image = ":image",
     repo_tags = ["senders:latest"],
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )
 
@@ -91,5 +123,6 @@ oci_push(
     name = "image_push",
     image = ":image",
     repository = "ghcr.io/athaller/senders",
+    tags = ["manual"],
     visibility = ["//visibility:public"],
 )

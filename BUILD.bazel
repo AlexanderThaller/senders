@@ -9,14 +9,16 @@ exports_files([
 
 # The trunk-built frontend, packaged into the container image by //deploy:image.
 #
-# Bazel does not build this -- see .bazelrc -- so `trunk build --release` has to
-# have run first. allow_empty = False turns a forgotten build into a loud error
-# at analysis time rather than an image that silently serves nothing.
+# allow_empty is on, and has to be: a glob is evaluated when the package is
+# LOADED, so `allow_empty = False` fails every `bazel …  //...` on a tree where
+# trunk has not run — including `bazel test //...`, which has no interest in the
+# frontend at all. The "did you forget to build it" check therefore lives at
+# build time instead, in //deploy:frontend_guard.
 filegroup(
     name = "frontend",
     srcs = glob(
         ["dist/**"],
-        allow_empty = False,
+        allow_empty = True,
     ),
     visibility = ["//deploy:__pkg__"],
 )

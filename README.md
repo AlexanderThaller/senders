@@ -405,9 +405,16 @@ Notes on the layout:
   a much newer host can still produce a binary the pinned base cannot run. A
   hermetic sysroot or a musl target would remove it, and neither is set up here.
 - Two layers, binary and frontend, so a change to one does not push the other.
-- Bazel packages `./dist`; it does not produce it. The `frontend` filegroup
-  globs with `allow_empty = False`, so a forgotten `trunk build` is an error at
-  analysis time rather than an image that silently serves nothing.
+- Bazel packages `./dist`; it does not produce it. `//deploy:frontend_guard`
+  turns a forgotten `trunk build` into a build error with an actionable message,
+  rather than an image that starts and then 404s every request. It emits an
+  empty tar merged through `pkg_tar`'s `deps`, so it adds no file and no layer —
+  the image digest is identical whether or not it is present.
+- Everything downstream of `./dist` is tagged `manual`, so `bazel test //...`
+  works on a tree where trunk has never run. Build the image by label. (The
+  check cannot be `allow_empty = False` on the glob: globs are evaluated at
+  package *load* time, so that version broke every `bazel … //...` rather than
+  only the image build.)
 
 ## Licence
 

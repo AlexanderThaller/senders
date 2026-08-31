@@ -62,9 +62,9 @@ jobs:
           cache-save: ${{ github.event_name != 'pull_request' }}
 
       # Bazel packages ./dist, it does not produce it: crates/web targets wasm32
-      # and trunk owns that pipeline. //:frontend globs with allow_empty=False,
-      # so if this step were missing the image build would fail at analysis time
-      # rather than publish an image that serves nothing.
+      # and trunk owns that pipeline. //deploy:frontend_guard fails the image
+      # build if this step is missing, rather than letting a publish go out with
+      # an image that starts and then 404s every request.
       - name: Install the wasm target
         run: rustup target add wasm32-unknown-unknown
 
