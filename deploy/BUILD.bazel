@@ -1,0 +1,68 @@
+load("@rules_oci//oci:defs.bzl", "oci_image", "oci_load")
+load("@rules_pkg//pkg:mappings.bzl", "pkg_attributes", "pkg_files", "strip_prefix")
+load("@rules_pkg//pkg:tar.bzl", "pkg_tar")
+
+# The container image, on distroless.
+#
+# Two layers rather than one: the frontend changes on every UI edit while the
+# binary does not, and vice versa, so keeping them apart means a rebuild pushes
+# only the half that moved.
+#
+# Caveat worth knowing: rules_rs links against the host's C library, so the
+# binary carries whatever glibc symbol versions the build machine's glibc
+# provides (currently up to GLIBC_2.38). The base image is pinned to
+# debian13/trixie, which has 2.41, so there is headroom -- but building on a
+# much newer host can still produce a binary the base cannot load. A hermetic
+# sysroot or a musl target would remove the coupling; neither is set up here.
+
+pkg_files(
+    name = "server_files",
+    srcs = ["//crates/server:senders"],
+    attributes = pkg_attributes(mode = "0755"),
+    prefix = "/usr/local/bin",
+)
+
+pkg_tar(
+    name = "server_layer",
+    srcs = [":server_files"],
+)
+
+pkg_files(
+    name = "frontend_files",
+    srcs = ["//:frontend"],
+    prefix = "/srv/dist",
+    strip_prefix = strip_prefix.from_root("dist"),
+)
+
+pkg_tar(
+    name = "frontend_layer",
+    srcs = [":frontend_files"],
+)
+
+oci_image(
+    name = "image",
+    base = "@distroless_cc",
+    entrypoint = ["/usr/local/bin/senders"],
+    env = {
+        "SENDERS_STATIC_DIR": "/srv/dist",
+        "SENDERS_BIND": "0.0.0.0:8080",
+        "SENDERS_LOG": "info,tower_http=warn",
+    },
+    exposed_ports = ["8080/tcp"],
+    tars = [
+        ":server_layer",
+        ":frontend_layer",
+    ],
+    # distroless ships this account; there is no shell to fall back to anyway.
+    user = "nonroot",
+    visibility = ["//visibility:public"],
+)
+
+# `bazel run //deploy:image_load` puts `senders:latest` into the local daemon,
+# which is what docker-compose.yml expects to find.
+oci_load(
+    name = "image_load",
+    image = ":image",
+    repo_tags = ["senders:latest"],
+    visibility = ["//visibility:public"],
+)

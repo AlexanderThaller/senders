@@ -140,8 +140,13 @@ just dev-stack             # runs senders against them
 Or the whole thing in containers:
 
 ```sh
-docker compose up -d --build     # serves on http://localhost:47920
+just image                 # builds the frontend, then the image, via Bazel
+docker compose up -d       # serves on http://localhost:47920
 ```
+
+There is no Dockerfile. The image is defined once, as `//deploy:image`, and
+`just image` loads it into the local daemon as `senders:latest`; compose then
+just runs it. See [Containers](#containers).
 
 The compose stack publishes high ports (`47920` for senders, `47921` for
 Dragonfly, `47922`/`47923` for Garage) so it does not collide with anything
@@ -166,6 +171,10 @@ Every setting is both a CLI flag and an environment variable.
 | `SENDERS_REAP_INTERVAL` | `60` | seconds between expiry sweeps |
 | `SENDERS_PUBLIC_URL` | `http://localhost:8080` | public origin, used for the OIDC redirect URI |
 | `SENDERS_LOG` | `info,tower_http=warn` | `tracing` filter |
+
+`senders --healthcheck` probes an already-running instance's `/healthz` and
+exits 0 or 1 rather than serving. It exists so the distroless image can declare
+a healthcheck without shipping a shell or an HTTP client.
 
 Expiry is clamped to **1–30 days** and the download budget to **1–1000**. A
 budget of `1` is the default: the file is destroyed as soon as it has been
@@ -229,11 +238,14 @@ straight into blob storage without buffering the whole file.
 ## Development
 
 ```sh
-just test        # server and shared-crate tests
+just test        # build, tests, clippy and rustfmt, in one Bazel invocation
 just test-wasm   # browser-crypto tests, run under Node against the built wasm
-just lint        # clippy, warnings denied
-just ci          # formatting, lint and every test
+just fmt         # reformat in place
+just ci          # both of the above
 ```
+
+The native crates go through Bazel; only the frontend recipes shell out to
+trunk and cargo, because Bazel does not build it.
 
 `just test-wasm` needs `wasm-bindgen-test-runner` on your `PATH` at the same
 version as the `wasm-bindgen` dependency.
@@ -279,6 +291,40 @@ open in the reader's own language. Strings live in
 a match arm.
 
 ---
+
+## Containers
+
+The image is built by Bazel with `rules_oci`, on
+`gcr.io/distroless/cc-debian13`:
+
+```sh
+just image                              # frontend, then image, then load
+bazel build -c opt //deploy:image       # the image on its own
+bazel run  -c opt //deploy:image_load   # load it as senders:latest
+```
+
+`-c opt` is not optional in practice: a fastbuild binary carries debug info and
+roughly doubles the image (50 MB against 101 MB).
+
+Notes on the layout:
+
+- **Distroless**, so there is no shell, no package manager and no curl in the
+  image. It runs as `nonroot`.
+- Because there is no curl, the container healthcheck is the binary itself:
+  `senders --healthcheck` opens a connection to its own listen port, asks for
+  `/healthz` and exits 0 or 1.
+- **`cc`, not `base`** — the server links `libgcc_s`, which `base` does not
+  carry.
+- **`debian13`, not `debian12`.** rules_rs links against the build machine's C
+  library, so the binary requires whatever glibc symbol versions that host
+  provides — currently up to `GLIBC_2.38`. Trixie ships 2.41; bookworm only has
+  2.36 and could not load it. This coupling is worth knowing about: building on
+  a much newer host can still produce a binary the pinned base cannot run. A
+  hermetic sysroot or a musl target would remove it, and neither is set up here.
+- Two layers, binary and frontend, so a change to one does not push the other.
+- Bazel packages `./dist`; it does not produce it. The `frontend` filegroup
+  globs with `allow_empty = False`, so a forgotten `trunk build` is an error at
+  analysis time rather than an image that silently serves nothing.
 
 ## Licence
 

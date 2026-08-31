@@ -13,8 +13,9 @@ crates/web/target
 # crates only; see the note in .bazelrc.
 crates/web
 
-# Build output and runtime data.
-dist
+# Runtime data. `dist` is deliberately NOT ignored: //deploy:image packages
+# the trunk-built frontend from there, and an ignored directory is invisible
+# to globs as well as to target patterns.
 data
 
 .claude

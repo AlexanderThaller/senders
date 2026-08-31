@@ -4,3 +4,17 @@ exports_files([
     "Cargo.toml",
     "Cargo.lock",
 ])
+
+# The trunk-built frontend, packaged into the container image by //deploy:image.
+#
+# Bazel does not build this -- see .bazelrc -- so `trunk build --release` has to
+# have run first. allow_empty = False turns a forgotten build into a loud error
+# at analysis time rather than an image that silently serves nothing.
+filegroup(
+    name = "frontend",
+    srcs = glob(
+        ["dist/**"],
+        allow_empty = False,
+    ),
+    visibility = ["//deploy:__pkg__"],
+)

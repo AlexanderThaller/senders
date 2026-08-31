@@ -1,6 +1,0 @@
-target
-crates/web/target
-crates/web/dist
-dist
-data
-.git

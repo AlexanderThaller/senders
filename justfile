@@ -86,5 +86,12 @@ ci: fmt-check lint test-all
 bazel:
     bazel test //...
 
+# -c opt matters: a fastbuild binary carries debug info and roughly doubles the
+# image. Bazel packages ./dist, it does not produce it, hence web-release.
+
+# Build the distroless image and load it into the local docker daemon.
+image: web-release
+    bazel run -c opt //deploy:image_load
+
 bazel-clippy:
     bazel build //crates/server:clippy //crates/proto:clippy

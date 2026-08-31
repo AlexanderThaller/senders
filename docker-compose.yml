@@ -2,7 +2,11 @@
 #
 #   docker compose up -d dragonfly garage   # dependencies only, for `just dev`
 #   ./scripts/init-garage.sh                # one-time bucket + key setup
+#   just image                              # build senders:latest with Bazel
 #   docker compose up -d                    # the whole thing, on :47920
+#
+# There is no Dockerfile: the image is defined once, in //deploy:image, and
+# loaded into the local daemon by `just image`.
 services:
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
@@ -29,7 +33,10 @@ services:
       - "47923:3903"
 
   senders:
-    build: .
+    # Built by Bazel, not by compose: `just image`, or
+    # `bazel run -c opt //deploy:image_load`.
+    image: senders:latest
+    pull_policy: never
     depends_on:
       dragonfly:
         condition: service_healthy
@@ -52,7 +59,8 @@ services:
       # downloads too. See the README for the OIDC settings it needs.
       SENDERS_AUTH_MODE: "off"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      # distroless has no shell and no curl, so the binary probes itself.
+      test: ["CMD", "/usr/local/bin/senders", "--healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5

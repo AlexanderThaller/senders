@@ -14,6 +14,10 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = Config::parse();
+    if config.healthcheck {
+        return healthcheck(senders_server::config::probe_address(config.bind)).await;
+    }
+
     let bind = config.bind;
     let reap_interval = Duration::from_secs(config.reap_interval.max(5));
     tracing::info!(
@@ -41,6 +45,41 @@ async fn main() -> anyhow::Result<()> {
     // Let the reaper finish its current sweep before the process exits.
     let _ = shutdown_tx.send(true);
     let _ = reaper_handle.await;
+    Ok(())
+}
+
+/// Ask a running instance whether it is healthy, speaking just enough HTTP/1.0
+/// to avoid pulling an HTTP client into the binary for this.
+async fn healthcheck(address: std::net::SocketAddr) -> anyhow::Result<()> {
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+
+    let probe = async {
+        let mut stream = tokio::net::TcpStream::connect(address).await?;
+        stream
+            .write_all(format!("GET /healthz HTTP/1.0\r\nHost: {address}\r\n\r\n").as_bytes())
+            .await?;
+        // The response is a status line plus "ok"; a small cap is plenty and
+        // keeps a misbehaving server from stalling the probe on a huge body.
+        let mut response = Vec::new();
+        stream.take(4096).read_to_end(&mut response).await?;
+        Ok::<_, std::io::Error>(response)
+    };
+
+    let response = tokio::time::timeout(Duration::from_secs(5), probe)
+        .await
+        .context("health probe timed out")?
+        .with_context(|| format!("could not reach {address}"))?;
+
+    let status = String::from_utf8_lossy(&response);
+    let healthy = status
+        .lines()
+        .next()
+        .is_some_and(|line| line.contains(" 200 "));
+    anyhow::ensure!(
+        healthy,
+        "unhealthy: {}",
+        status.lines().next().unwrap_or("no response")
+    );
     Ok(())
 }
 

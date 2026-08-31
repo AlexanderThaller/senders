@@ -115,6 +115,30 @@ pub struct Config {
     /// Drop the `Secure` attribute on cookies, for plain-HTTP local testing.
     #[arg(long, env = "SENDERS_COOKIE_INSECURE", default_value_t = false)]
     pub cookie_insecure: bool,
+
+    /// Probe a already-running instance's `/healthz` and exit 0 or 1 instead of
+    /// serving.
+    ///
+    /// This exists so the container image can declare a HEALTHCHECK: it runs on
+    /// distroless, which has no shell, no curl and no wget, so the binary has
+    /// to be able to check itself.
+    #[arg(long, default_value_t = false)]
+    pub healthcheck: bool,
+}
+
+/// The address a health probe should connect to, given a listen address.
+///
+/// A server bound to the wildcard address is not reachable *at* it on every
+/// platform, so probes go to loopback on the same port.
+pub fn probe_address(bind: SocketAddr) -> SocketAddr {
+    if bind.ip().is_unspecified() {
+        match bind {
+            SocketAddr::V4(_) => SocketAddr::from((std::net::Ipv4Addr::LOCALHOST, bind.port())),
+            SocketAddr::V6(_) => SocketAddr::from((std::net::Ipv6Addr::LOCALHOST, bind.port())),
+        }
+    } else {
+        bind
+    }
 }
 
 impl Config {
@@ -222,6 +246,25 @@ mod tests {
         assert_eq!(cfg.clamp_downloads(None), 1);
         assert_eq!(cfg.clamp_downloads(Some(0)), 1);
         assert_eq!(cfg.clamp_downloads(Some(u32::MAX)), MAX_DOWNLOADS);
+    }
+
+    #[test]
+    fn health_probes_target_loopback_when_bound_to_the_wildcard() {
+        let parse = |s: &str| s.parse::<SocketAddr>().unwrap();
+        assert_eq!(
+            probe_address(parse("0.0.0.0:8080")),
+            parse("127.0.0.1:8080")
+        );
+        assert_eq!(probe_address(parse("[::]:8080")), parse("[::1]:8080"));
+        // An explicit address is already reachable and must be left alone.
+        assert_eq!(
+            probe_address(parse("10.1.2.3:9000")),
+            parse("10.1.2.3:9000")
+        );
+        assert_eq!(
+            probe_address(parse("127.0.0.1:1234")),
+            parse("127.0.0.1:1234")
+        );
     }
 
     #[test]
