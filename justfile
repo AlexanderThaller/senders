@@ -29,9 +29,13 @@ web-release:
 server:
     bazel build //crates/server:senders
 
-# Everything, optimised.
+# Mirrors [profile.deploy] and .cargo/config.toml; see .bazelrc.
+# Note --config=deploy cannot be applied to //... -- panic=abort and libtest
+# are incompatible, exactly as `cargo test --profile deploy` is.
+
+# Everything, built the way it ships.
 build: web-release
-    bazel build -c opt //crates/server:senders
+    bazel build --config=deploy --config=x86-64-v3 //crates/server:senders
 
 # Lints and format checks are ordinary Bazel targets, so none of them
 # discards another's analysis cache.
@@ -100,12 +104,16 @@ dev-stack: web
 
 # --- containers --------------------------------------------------------------
 
-# -c opt matters: a fastbuild binary carries debug info and roughly doubles the
-# image. Bazel packages ./dist, it does not produce it, hence web-release.
+# Built --config=deploy, matching [profile.deploy], plus --config=x86-64-v3.
+# The resulting image therefore REQUIRES an x86-64-v3 host (AVX2, BMI2, FMA --
+# Haswell/Excavator or newer) and will die with SIGILL on anything older. Drop
+# the second --config for a portable image.
+#
+# Bazel packages ./dist, it does not produce it, hence web-release.
 
 # Build the distroless image and load it into the local docker daemon.
 image: web-release
-    bazel run -c opt //deploy:image_load
+    bazel run --config=deploy --config=x86-64-v3 //deploy:image_load
 
 # Bring the dependency containers up, with a one-time Garage setup.
 stack-up:

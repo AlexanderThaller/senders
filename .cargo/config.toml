@@ -1,0 +1,10 @@
+# Scoped to x86-64 rather than set under [build].
+#
+# A bare `[build] rustflags` also reaches wasm32, where rustc reports
+# "'x86-64-v3' is not a recognized processor for this target (ignoring
+# processor)" and, along with the processor, drops the target's default
+# features. wasm-bindgen then fails with
+#   failed to find the `__wbindgen_externref_table_alloc` function
+# because reference-types went with them. Scoping keeps the frontend building.
+[target.'cfg(target_arch = "x86_64")']
+rustflags = ["-C", "target-cpu=x86-64-v3"]

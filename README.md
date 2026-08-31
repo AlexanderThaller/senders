@@ -247,6 +247,28 @@ just ci          # both of the above
 The native crates go through Bazel; only the frontend recipes shell out to
 trunk and cargo, because Bazel does not build it.
 
+### Build profiles
+
+`[profile.deploy]` in `Cargo.toml` is the shipping profile: LTO, one codegen
+unit, `panic = "abort"`. `.cargo/config.toml` builds x86-64 targets for
+`x86-64-v3`. Bazel has no notion of a named Cargo profile, so both are mirrored
+in `.bazelrc` as `--config` shorthands:
+
+```sh
+cargo build --profile deploy
+bazel build --config=deploy --config=x86-64-v3 //crates/server:senders
+```
+
+`--config=deploy` has to name the binary rather than `//...`: rustc requires a
+single panic strategy across the crate graph and libtest needs unwinding, so
+the test targets cannot build under it. `cargo test --profile deploy` fails the
+same way.
+
+The `x86-64-v3` flag is scoped to `cfg(target_arch = "x86_64")` rather than set
+under `[build]`. A bare `[build] rustflags` also reaches `wasm32`, where rustc
+ignores the unknown processor *and drops the target's default features with
+it*, leaving wasm-bindgen unable to find `__wbindgen_externref_table_alloc`.
+
 `just test-wasm` needs `wasm-bindgen-test-runner` on your `PATH` at the same
 version as the `wasm-bindgen` dependency.
 
@@ -298,13 +320,19 @@ The image is built by Bazel with `rules_oci`, on
 `gcr.io/distroless/cc-debian13`:
 
 ```sh
-just image                              # frontend, then image, then load
-bazel build -c opt //deploy:image       # the image on its own
-bazel run  -c opt //deploy:image_load   # load it as senders:latest
+just image                             # frontend, then image, then load
+bazel build --config=deploy //deploy:image       # the image on its own
+bazel run  --config=deploy //deploy:image_load   # load it as senders:latest
 ```
 
-`-c opt` is not optional in practice: a fastbuild binary carries debug info and
-roughly doubles the image (50 MB against 101 MB).
+The configuration matters: `--config=deploy --config=x86-64-v3` gives a 36 MB
+image, plain `-c opt` 50 MB, and fastbuild 101 MB, because a fastbuild binary
+carries debug info and skips LTO.
+
+`just image` includes `--config=x86-64-v3`, so **the image requires an
+x86-64-v3 host** — AVX2, BMI2 and FMA, meaning Haswell or Excavator and newer.
+On anything older it dies with SIGILL. Drop that one `--config` for a portable
+image.
 
 Notes on the layout:
 
