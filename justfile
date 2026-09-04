@@ -37,6 +37,25 @@ server:
 build: web-release
     bazel build --config=deploy --config=x86-64-v3 //crates/server:senders
 
+# --- native crates without bazel (cargo) -------------------------------------
+
+# Bazel does not build everywhere -- there is no FreeBSD toolchain, for one --
+# and underneath it the native crates are an ordinary Cargo workspace. These
+# are the cargo equivalents of `server` and `build` above and produce the same
+# binary, at target/deploy/senders rather than under bazel-bin.
+#
+# `--config=x86-64-v3` has no counterpart here: .cargo/config.toml already
+# applies target-cpu=x86-64-v3 to every x86-64 build, so the binary carries the
+# same requirement. What these do not give you is clippy and rustfmt, which
+# Bazel runs as part of `just test`; `just ci` stays the check before a push.
+
+# Build just the server binary, without Bazel.
+server-cargo:
+    cargo build --profile deploy --bin senders
+
+# Everything, built the way it ships, without Bazel.
+build-cargo: web-release server-cargo
+
 # Lints and format checks are ordinary Bazel targets, so none of them
 # discards another's analysis cache.
 
