@@ -79,6 +79,27 @@ Add `SENDERS_OIDC_CLIENT_SECRET` here too when enabling login. Sealed-secrets or
 external-secrets work unchanged; the Deployment only cares that a Secret of that
 name exists.
 
+### Or no Secret at all
+
+A Kubernetes Secret puts the values in etcd, where anyone with `get secret` in
+the namespace can read them. If you run a secrets manager that mounts files —
+Vault with the secrets-store CSI driver, for instance — point the server at the
+mount instead and create no Secret:
+
+```yaml
+env:
+  - name: SENDERS_SESSION_SECRET_FILE
+    value: /run/secrets-store/session_secret
+  - name: SENDERS_OIDC_CLIENT_SECRET_FILE
+    value: /run/secrets-store/client_secret
+  # The AWS SDK's own file-based credential source; no S3 keys in the pod spec.
+  - name: AWS_SHARED_CREDENTIALS_FILE
+    value: /run/secrets-store/credentials
+```
+
+Nothing then needs to be synced into etcd. See the main README for what the
+`_FILE` variables accept.
+
 ## Operational notes
 
 - **Probes.** Readiness is `/healthz`, which checks Redis and object storage.

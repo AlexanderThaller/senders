@@ -29,7 +29,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
 /// Wire up storage, sessions and (optionally) the identity provider.
-pub async fn build_state(config: Config) -> anyhow::Result<AppState> {
+pub async fn build_state(mut config: Config) -> anyhow::Result<AppState> {
+    // Before validate(), so a `--*-secret-file` counts as the secret being set.
+    config.load_secret_files()?;
     config.validate()?;
 
     let blobs = blob::from_uri(&config.storage).await?;

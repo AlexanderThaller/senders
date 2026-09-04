@@ -1,6 +1,7 @@
 //! Runtime configuration. Every knob is available as both a CLI flag and an
 //! environment variable, so the same binary is convenient locally and in a pod.
 
+use anyhow::Context as _;
 use clap::{Parser, ValueEnum};
 use senders_proto::{
     DEFAULT_EXPIRY_SECS, DEFAULT_MAX_DOWNLOADS, MAX_DOWNLOADS, MAX_EXPIRY_SECS, MIN_EXPIRY_SECS,
@@ -102,6 +103,18 @@ pub struct Config {
     /// OIDC client secret, for confidential clients.
     pub oidc_client_secret: Option<String>,
 
+    /// File holding the OIDC client secret, read at startup.
+    ///
+    /// Preferred over the inline form wherever a secrets manager delivers
+    /// material as a mounted file: the value never appears in the pod spec,
+    /// the process environment, or `/proc/<pid>/environ`.
+    #[arg(
+        long,
+        env = "SENDERS_OIDC_CLIENT_SECRET_FILE",
+        conflicts_with = "oidc_client_secret"
+    )]
+    pub oidc_client_secret_file: Option<PathBuf>,
+
     /// Extra scopes to request, comma-separated. `openid` is always included.
     #[arg(long, env = "SENDERS_OIDC_SCOPES", default_value = "email,profile")]
     pub oidc_scopes: String,
@@ -114,6 +127,16 @@ pub struct Config {
     /// invalidates sessions on restart and breaks multi-replica deployments.
     #[arg(long, env = "SENDERS_SESSION_SECRET", hide_env_values = true)]
     pub session_secret: Option<String>,
+
+    /// File holding the session signing key, read at startup.
+    ///
+    /// Same reasoning as `--oidc-client-secret-file`.
+    #[arg(
+        long,
+        env = "SENDERS_SESSION_SECRET_FILE",
+        conflicts_with = "session_secret"
+    )]
+    pub session_secret_file: Option<PathBuf>,
 
     /// Session lifetime, in seconds.
     #[arg(long, env = "SENDERS_SESSION_TTL", default_value_t = 12 * 60 * 60)]
@@ -206,6 +229,37 @@ impl Config {
             .collect()
     }
 
+    /// Read every `--*-secret-file` into its inline counterpart.
+    ///
+    /// Called once at startup, before anything looks at the secrets. Reading
+    /// them here rather than at each use keeps the rest of the server unaware
+    /// that a file was involved, and turns an unreadable mount into a clean
+    /// failure to start instead of a request-time error.
+    ///
+    /// A trailing newline is stripped: `echo`, `openssl rand -base64` and most
+    /// secret managers add one, and a signing key that differs by a newline
+    /// fails in a way that looks like a wrong key rather than a formatting
+    /// mistake. An otherwise empty file is an error for the same reason — it
+    /// is a mount that has not been populated, not a deliberate empty secret.
+    pub fn load_secret_files(&mut self) -> anyhow::Result<()> {
+        for (target, path) in [
+            (&mut self.oidc_client_secret, &self.oidc_client_secret_file),
+            (&mut self.session_secret, &self.session_secret_file),
+        ] {
+            let Some(path) = path else { continue };
+            let value = std::fs::read_to_string(path)
+                .with_context(|| format!("reading the secret file {}", path.display()))?;
+            let value = value.trim_end_matches(['\n', '\r']);
+            anyhow::ensure!(
+                !value.is_empty(),
+                "the secret file {} is empty",
+                path.display()
+            );
+            *target = Some(value.to_owned());
+        }
+        Ok(())
+    }
+
     /// Reject configurations that would silently do the wrong thing.
     pub fn validate(&self) -> anyhow::Result<()> {
         if self.auth_mode.enabled() {
@@ -282,6 +336,68 @@ mod tests {
         assert_eq!(
             probe_address(parse("127.0.0.1:1234")),
             parse("127.0.0.1:1234")
+        );
+    }
+
+    #[test]
+    fn secret_files_are_read_and_their_trailing_newline_stripped() {
+        let dir = std::env::temp_dir().join("senders-secret-file-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("session-secret");
+        // The trailing newline is what `openssl rand -base64 32 > file` and
+        // most secret managers write.
+        std::fs::write(&path, "s3cret\n").unwrap();
+
+        let mut cfg = Config::parse_from([
+            "senders",
+            "--session-secret-file",
+            &path.display().to_string(),
+        ]);
+        assert_eq!(cfg.session_secret, None, "not read until load_secret_files");
+        cfg.load_secret_files().unwrap();
+        assert_eq!(cfg.session_secret.as_deref(), Some("s3cret"));
+
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn an_empty_secret_file_is_an_unpopulated_mount_not_an_empty_secret() {
+        let dir = std::env::temp_dir().join("senders-secret-file-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("empty-secret");
+        std::fs::write(&path, "\n").unwrap();
+
+        let mut cfg = Config::parse_from([
+            "senders",
+            "--session-secret-file",
+            &path.display().to_string(),
+        ]);
+        assert!(cfg.load_secret_files().is_err());
+
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
+    fn a_missing_secret_file_fails_to_start_rather_than_serving_without_it() {
+        let mut cfg = Config::parse_from([
+            "senders",
+            "--oidc-client-secret-file",
+            "/nonexistent/senders/client-secret",
+        ]);
+        assert!(cfg.load_secret_files().is_err());
+    }
+
+    #[test]
+    fn the_inline_and_file_forms_of_a_secret_are_mutually_exclusive() {
+        assert!(
+            Config::try_parse_from([
+                "senders",
+                "--session-secret",
+                "inline",
+                "--session-secret-file",
+                "/tmp/whatever",
+            ])
+            .is_err()
         );
     }
 
