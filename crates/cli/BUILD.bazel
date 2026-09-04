@@ -1,0 +1,70 @@
+load("@crates//:defs.bzl", "aliases", "all_crate_deps", "edition", "lint_config")
+load("@rules_rs//rs:rust_binary.bzl", "rust_binary")
+load("@rules_rs//rs:rust_library.bzl", "rust_library")
+load("@rules_rs//rs:rust_test.bzl", "rust_test")
+load("@rules_rust//rust:defs.bzl", "rust_clippy", "rustfmt_test")
+
+# all_crate_deps resolves the senders-proto path dependency to
+# //crates/proto:proto on its own; it does not need naming here.
+DEPS = all_crate_deps(normal = True)
+
+TEST_DEPS = all_crate_deps(
+    normal = True,
+    normal_dev = True,
+)
+
+rust_library(
+    name = "senders_cli",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/main.rs"],
+    ),
+    aliases = aliases(),
+    edition = edition(),
+    lint_config = lint_config(),
+    visibility = ["//visibility:public"],
+    deps = DEPS,
+)
+
+rust_binary(
+    name = "senders-cli",
+    srcs = ["src/main.rs"],
+    aliases = aliases(),
+    edition = edition(),
+    lint_config = lint_config(),
+    visibility = ["//visibility:public"],
+    deps = DEPS + [":senders_cli"],
+)
+
+# Unit tests living inside the library.
+rust_test(
+    name = "senders_cli_test",
+    size = "small",
+    aliases = aliases(),
+    crate = ":senders_cli",
+    edition = edition(),
+    lint_config = lint_config(),
+    deps = TEST_DEPS,
+)
+
+# Clippy and rustfmt as ordinary targets rather than aspects behind a
+# --config, so one `bazel test //...` covers build, test, lint and format
+# without any invocation discarding another's analysis cache.
+ALL_TARGETS = [
+    ":senders_cli",
+    ":senders-cli",
+    ":senders_cli_test",
+]
+
+# testonly because it depends on the test target.
+rust_clippy(
+    name = "clippy",
+    testonly = True,
+    deps = ALL_TARGETS,
+)
+
+rustfmt_test(
+    name = "rustfmt",
+    size = "small",
+    targets = ALL_TARGETS,
+)

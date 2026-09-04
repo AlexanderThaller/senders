@@ -117,11 +117,7 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
     let chunk = crate::convert::len_to_f64(CHUNK_SIZE);
     // An empty file still gets one empty, authenticated record, so that
     // "zero bytes" is a fact the recipient can verify rather than assume.
-    let records = if size == 0.0 {
-        1u32
-    } else {
-        crate::convert::to_u32((size / chunk).ceil())
-    };
+    let records = senders_proto::stream::plain_record_count(crate::convert::to_u64(size));
 
     let mut builder = BlobBuilder::default();
     for index in 0..records {
@@ -162,25 +158,6 @@ pub async fn seal_file(file: &File, mut on_progress: impl FnMut(f64)) -> Result<
     })
 }
 
-/// The STREAM counter for record `index`.
-///
-/// The counter is 32 bits, which at 64 KiB records caps a file at 256 TiB —
-/// far beyond any size the server will accept — so this cannot be reached in
-/// practice.
-fn record_index(index: u64) -> u32 {
-    u32::try_from(index).expect("record counts are bounded by the maximum file size")
-}
-
-/// How many ciphertext records make up a body of `cipher_len` bytes.
-fn record_count(cipher_len: u64) -> u64 {
-    let full = CHUNK_CIPHERTEXT_SIZE as u64;
-    if cipher_len == 0 {
-        1
-    } else {
-        cipher_len.div_ceil(full)
-    }
-}
-
 /// Stream the ciphertext down and decrypt it into a `Blob`.
 ///
 /// Any tampering, reordering or truncation makes a record fail to
@@ -214,7 +191,7 @@ pub async fn open_stream(
 ) -> Result<Blob> {
     use futures_util::StreamExt;
 
-    let total_records = record_count(cipher_len);
+    let total_records = senders_proto::stream::cipher_record_count(cipher_len);
     let mut stream = Box::pin(stream);
 
     let mut builder = BlobBuilder::default();
@@ -228,7 +205,12 @@ pub async fn open_stream(
         while index + 1 < total_records && buffer.len() >= CHUNK_CIPHERTEXT_SIZE {
             let record: Vec<u8> = buffer.drain(..CHUNK_CIPHERTEXT_SIZE).collect();
             let plaintext = keys
-                .open_record(nonce_prefix, record_index(index), false, &record)
+                .open_record(
+                    nonce_prefix,
+                    senders_proto::stream::record_index(index),
+                    false,
+                    &record,
+                )
                 .await
                 .map_err(to_error)?;
             builder.push(&plaintext)?;
@@ -243,7 +225,12 @@ pub async fn open_stream(
         )));
     }
     let plaintext = keys
-        .open_record(nonce_prefix, record_index(index), true, &buffer)
+        .open_record(
+            nonce_prefix,
+            senders_proto::stream::record_index(index),
+            true,
+            &buffer,
+        )
         .await
         .map_err(to_error)?;
     builder.push(&plaintext)?;
@@ -270,42 +257,19 @@ pub fn save_blob(blob: &Blob, filename: &str) -> Result<()> {
 
 /// Build the share link. The secret goes in the fragment, which browsers do
 /// not send to servers and which stays out of access logs and `Referer`.
+/// The format itself lives in `senders_proto::link`, shared with
+/// `crates/cli`.
 #[must_use]
 pub fn share_url(origin: &str, id: &str, secret: &[u8]) -> String {
-    format!(
-        "{}/d/{id}#{}",
-        origin.trim_end_matches('/'),
-        b64::encode(secret)
-    )
+    senders_proto::link::share_url(origin, id, secret)
 }
 
-/// Read the secret back out of `location.hash`.
+/// Read the secret back out of `location.hash`. Decoding and validating it is
+/// `senders_proto::link`'s; only reaching into `location.hash` is
+/// browser-specific.
 #[must_use]
 pub fn secret_from_fragment() -> Option<Vec<u8>> {
     let hash = web_sys::window()?.location().hash().ok()?;
     let raw = hash.strip_prefix('#').unwrap_or(&hash);
-    let secret = b64::decode(raw)?;
-    (secret.len() == SECRET_LEN).then_some(secret)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn record_counts_cover_the_boundaries() {
-        assert_eq!(record_count(0), 1);
-        assert_eq!(record_count(1), 1);
-        assert_eq!(record_count(CHUNK_CIPHERTEXT_SIZE as u64), 1);
-        assert_eq!(record_count(CHUNK_CIPHERTEXT_SIZE as u64 + 1), 2);
-        assert_eq!(record_count(2 * CHUNK_CIPHERTEXT_SIZE as u64), 2);
-    }
-
-    #[test]
-    fn share_urls_put_the_secret_in_the_fragment() {
-        let url = share_url("https://send.example/", "abc", &[0u8; SECRET_LEN]);
-        let (base, fragment) = url.split_once('#').expect("share URLs carry a fragment");
-        assert_eq!(base, "https://send.example/d/abc");
-        assert_eq!(b64::decode(fragment).unwrap().len(), SECRET_LEN);
-    }
+    senders_proto::link::decode_secret(raw)
 }

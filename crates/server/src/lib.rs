@@ -18,13 +18,16 @@ pub mod util;
 use auth::{CurrentUser, SessionSigner};
 use axum::extract::State;
 use axum::http::{HeaderValue, StatusCode, header};
+use axum::response::{Html, IntoResponse};
 use axum::routing::get;
 use axum::{Json, Router};
 use config::Config;
 use senders_proto::ServerInfo;
 use state::AppState;
+use std::convert::Infallible;
 use std::sync::Arc;
-use tower_http::services::{ServeDir, ServeFile};
+use tower::service_fn;
+use tower_http::services::ServeDir;
 use tower_http::set_header::SetResponseHeaderLayer;
 use tower_http::trace::TraceLayer;
 
@@ -67,14 +70,40 @@ pub async fn build_state(mut config: Config) -> anyhow::Result<AppState> {
 /// hardening headers that wrap all of them.
 pub fn router(state: AppState) -> Router {
     let static_dir = state.config.static_dir.clone();
-    // Unknown paths fall through to the SPA shell so deep links like
-    // `/d/<id>#<key>` load the app instead of 404ing.
-    let frontend =
-        ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html")));
-
     let index_html = std::fs::read_to_string(static_dir.join("index.html")).ok();
     let csp = content_security_policy(index_html.as_deref());
     let csp = HeaderValue::from_str(&csp).expect("the policy is built from ASCII");
+
+    // The Open Graph tags in index.html need an absolute URL, which trunk
+    // cannot bake in at build time -- the same page is served from whatever
+    // origin this instance runs at. Render it once, from the pristine file on
+    // disk, rather than mutating dist/index.html: a redeploy that changes
+    // public_url but doesn't rebuild the frontend must still pick it up.
+    //
+    // None (no index.html on disk) stays None rather than falling back to an
+    // empty page: a static_dir without a build must still 404, the same as
+    // the ServeFile it replaces would have.
+    let rendered_index: Option<Arc<str>> = index_html
+        .as_deref()
+        .map(|html| Arc::from(render_index_html(html, &state.config.public_url)));
+
+    // append_index_html_on_directories(false) sends "/" through the fallback
+    // below too, so it gets the same rendering as every other unmatched path
+    // instead of the raw file straight off disk.
+    //
+    // Unknown paths fall through to the SPA shell so deep links like
+    // `/d/<id>#<key>` load the app instead of 404ing.
+    let frontend = ServeDir::new(&static_dir)
+        .append_index_html_on_directories(false)
+        .fallback(service_fn(move |_req: axum::extract::Request| {
+            let rendered_index = rendered_index.clone();
+            async move {
+                Ok::<_, Infallible>(match rendered_index {
+                    Some(html) => Html(html.to_string()).into_response(),
+                    None => StatusCode::NOT_FOUND.into_response(),
+                })
+            }
+        }));
 
     let mut app = Router::new()
         .route("/api/info", get(info))
@@ -166,6 +195,16 @@ fn content_security_policy(index_html: Option<&str>) -> String {
     )
 }
 
+/// Substitute the `__PUBLIC_URL__` placeholder in the shipped `index.html`
+/// with `public_url`, for the absolute URLs Open Graph tags require.
+///
+/// A missing placeholder (an `index.html` built before this existed, or a
+/// static dir without one at all) leaves the input unchanged rather than
+/// erroring — the page still renders, just without a link-preview image.
+fn render_index_html(index_html: &str, public_url: &str) -> String {
+    index_html.replace("__PUBLIC_URL__", public_url.trim_end_matches('/'))
+}
+
 async fn info(
     State(state): State<AppState>,
     CurrentUser(session): CurrentUser,
@@ -240,5 +279,29 @@ mod tests {
         ] {
             assert!(policy.contains(directive), "missing {directive}");
         }
+    }
+
+    #[test]
+    fn render_index_html_substitutes_every_placeholder() {
+        let html = r#"<meta property="og:url" content="__PUBLIC_URL__/" />
+            <meta property="og:image" content="__PUBLIC_URL__/icons/icon-512.png" />"#;
+        let rendered = render_index_html(html, "https://senders.example.com");
+        assert!(!rendered.contains("__PUBLIC_URL__"));
+        assert!(rendered.contains(r#"content="https://senders.example.com/""#));
+        assert!(rendered.contains("https://senders.example.com/icons/icon-512.png"));
+    }
+
+    #[test]
+    fn render_index_html_strips_a_trailing_slash_from_public_url() {
+        // public_url is user-configured; a trailing slash must not produce a
+        // double slash in the substituted URL.
+        let rendered = render_index_html("__PUBLIC_URL__/icons/x.png", "https://example.com/");
+        assert_eq!(rendered, "https://example.com/icons/x.png");
+    }
+
+    #[test]
+    fn render_index_html_is_a_no_op_without_the_placeholder() {
+        let html = "<html><head></head></html>";
+        assert_eq!(render_index_html(html, "https://example.com"), html);
     }
 }

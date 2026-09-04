@@ -44,22 +44,6 @@ pub fn to_u64(value: f64) -> u64 {
     }
 }
 
-/// An `f64` as a record count, saturating rather than wrapping.
-#[expect(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "clamped to a finite range within u32 first"
-)]
-pub fn to_u32(value: f64) -> u32 {
-    if !value.is_finite() || value <= 0.0 {
-        0
-    } else if value >= f64::from(u32::MAX) {
-        u32::MAX
-    } else {
-        value as u32
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -70,12 +54,6 @@ mod tests {
         assert_eq!(to_u64(f64::NAN), 0);
         assert_eq!(to_u64(f64::INFINITY), 0);
         assert_eq!(to_u64(1024.9), 1024);
-
-        assert_eq!(to_u32(-5.0), 0);
-        assert_eq!(to_u32(f64::NAN), 0);
-        assert_eq!(to_u32(f64::INFINITY), u32::MAX);
-        assert_eq!(to_u32(1e30), u32::MAX);
-        assert_eq!(to_u32(7.9), 7);
     }
 
     #[test]

@@ -7,6 +7,9 @@
 use serde::{Deserialize, Serialize};
 
 pub mod b64;
+pub mod link;
+pub mod passphrase;
+pub mod stream;
 
 /// Plaintext bytes per AES-GCM record. Ciphertext records are 16 bytes longer.
 pub const CHUNK_SIZE: usize = 64 * 1024;
