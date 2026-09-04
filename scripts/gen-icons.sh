@@ -67,6 +67,12 @@ EOF
 for s in 16 32 48; do render "$out/favicon.svg" "$s" "$tmp/ico-$s.png"; done
 magick "$tmp/ico-16.png" "$tmp/ico-32.png" "$tmp/ico-48.png" "$out/favicon.ico"
 
+# Standalone PNG favicons: Chrome and Firefox prefer these over the .ico when
+# both are linked, and unlike the .ico they are reachable and cacheable on
+# their own.
+cp "$tmp/ico-16.png" "$out/favicon-16x16.png"
+cp "$tmp/ico-32.png" "$out/favicon-32x32.png"
+
 # PWA icons, used as drawn.
 render "$out/favicon.svg" 192 "$out/icon-192.png"
 render "$out/favicon.svg" 512 "$out/icon-512.png"
