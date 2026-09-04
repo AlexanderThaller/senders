@@ -9,5 +9,9 @@ description = "Shared wire types and crypto parameters for senders"
 serde.workspace = true
 base64.workspace = true
 
+[dev-dependencies]
+# Only to assert on the JSON these types actually produce and accept.
+serde_json.workspace = true
+
 [lints]
 workspace = true

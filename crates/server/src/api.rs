@@ -216,6 +216,7 @@ async fn upload(
         id,
         owner_token,
         expires_at: record.expires_at,
+        max_downloads: Some(record.max_downloads),
     }))
 }
 

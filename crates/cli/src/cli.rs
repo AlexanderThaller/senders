@@ -18,6 +18,11 @@ pub struct Cli {
     )]
     pub url: Url,
 
+    /// Do not draw a progress bar during a transfer. Redirected output needs
+    /// no flag: the bar is only drawn when stderr is a terminal.
+    #[arg(long, env = "SENDERS_CLI_NO_PROGRESS", global = true)]
+    pub no_progress: bool,
+
     /// What to do.
     #[command(subcommand)]
     pub command: Command,

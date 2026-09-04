@@ -9,4 +9,5 @@ pub mod api;
 pub mod cli;
 pub mod commands;
 pub mod crypto;
+pub mod progress;
 pub mod transfer;
