@@ -3,6 +3,7 @@
 use crate::api;
 use crate::cli::DownloadArgs;
 use crate::crypto::{self, FileKeys};
+use crate::progress::Mode;
 use crate::transfer;
 use anyhow::Context as _;
 use reqwest::{Client, Url};
@@ -10,7 +11,12 @@ use senders_proto::{AUTH_SALT_LEN, FileMetadata, b64};
 use std::path::PathBuf;
 
 /// Resolve, decrypt and save the file behind `args.link`.
-pub async fn run(client: &Client, base: &Url, args: DownloadArgs) -> anyhow::Result<()> {
+pub async fn run(
+    client: &Client,
+    base: &Url,
+    args: DownloadArgs,
+    progress: Mode,
+) -> anyhow::Result<()> {
     let (id, secret) = transfer::parse_link(&args.link)?;
     let mut keys = FileKeys::derive(&secret)?;
 
@@ -58,12 +64,22 @@ pub async fn run(client: &Client, base: &Url, args: DownloadArgs) -> anyhow::Res
         .with_context(|| format!("creating {}", output.display()))?;
 
     let stream = api::download_stream(client, base, &id, &keys.auth).await?;
-    transfer::open_stream(&keys, &nonce_prefix, meta_response.size, stream, out_file)
-        .await
-        .context(
-            "downloading the file failed — any tampering, corruption or truncation surfaces \
-             here rather than as a corrupted file",
-        )?;
+    // `meta_response.size` is the ciphertext length, which is what the bar
+    // sees arriving; the plaintext size printed below is a tag per record less.
+    let bar = progress.bar(meta_response.size, "Downloading");
+    let result = transfer::open_stream(
+        &keys,
+        &nonce_prefix,
+        meta_response.size,
+        bar.track(stream),
+        out_file,
+    )
+    .await;
+    bar.close(&result);
+    result.context(
+        "downloading the file failed — any tampering, corruption or truncation surfaces \
+         here rather than as a corrupted file",
+    )?;
 
     let name = &file_metadata.name;
     let mime = &file_metadata.mime;

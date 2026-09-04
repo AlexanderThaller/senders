@@ -4,6 +4,7 @@
 use crate::api::{self, UploadParams};
 use crate::cli::UploadArgs;
 use crate::crypto::{self, FileKeys};
+use crate::progress::Mode;
 use crate::transfer;
 use anyhow::Context as _;
 use reqwest::{Client, Url};
@@ -14,7 +15,12 @@ use std::sync::Arc;
 
 /// Encrypt `args.file` under a freshly generated secret and upload it,
 /// printing the share link (and passphrase, if any) to stdout.
-pub async fn run(client: &Client, base: &Url, args: UploadArgs) -> anyhow::Result<()> {
+pub async fn run(
+    client: &Client,
+    base: &Url,
+    args: UploadArgs,
+    progress: Mode,
+) -> anyhow::Result<()> {
     let size = tokio::fs::metadata(&args.file)
         .await
         .with_context(|| format!("reading {}", args.file.display()))?
@@ -58,12 +64,16 @@ pub async fn run(client: &Client, base: &Url, args: UploadArgs) -> anyhow::Resul
     let file = tokio::fs::File::open(&args.file)
         .await
         .with_context(|| format!("opening {}", args.file.display()))?;
-    let body = reqwest::Body::wrap_stream(transfer::seal_stream(
+    // The bar counts the ciphertext handed to reqwest, which is what actually
+    // goes over the wire; it therefore totals a tag per record more than the
+    // file on disk.
+    let bar = progress.bar(senders_proto::ciphertext_len(size), "Uploading");
+    let body = reqwest::Body::wrap_stream(bar.track(transfer::seal_stream(
         file,
         Arc::clone(&keys),
         nonce_prefix.clone(),
         size,
-    ));
+    )));
 
     let params = UploadParams {
         metadata: b64::encode(&sealed_metadata),
@@ -74,7 +84,11 @@ pub async fn run(client: &Client, base: &Url, args: UploadArgs) -> anyhow::Resul
         max_downloads: args.max_downloads,
     };
 
-    let response = api::upload(client, base, &params, body).await?;
+    let response = api::upload(client, base, &params, body).await;
+    // Close before printing either way: a live bar would otherwise be redrawn
+    // over the link, or over the error.
+    bar.close(&response);
+    let response = response?;
     let link = senders_proto::link::share_url(base.as_str(), &response.id, &secret);
 
     println!("{link}");
