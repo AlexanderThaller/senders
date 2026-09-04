@@ -25,8 +25,7 @@
 
 use js_sys::{Object, Reflect, Uint8Array};
 use senders_proto::{
-    CHUNK_SIZE, INFO_AUTH, INFO_CONTENT, INFO_METADATA, KEY_LEN, NONCE_LEN, NONCE_PREFIX_LEN,
-    SECRET_LEN, TAG_LEN,
+    CHUNK_SIZE, INFO_AUTH, INFO_CONTENT, INFO_METADATA, KEY_LEN, NONCE_LEN, SECRET_LEN, TAG_LEN,
 };
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -87,30 +86,14 @@ pub fn random_bytes(n: usize) -> Result<Vec<u8>> {
     Ok(buf)
 }
 
-/// Crockford base32: no `I`, `L`, `O` or `U`, so a passphrase read aloud or
-/// copied by hand does not turn into a different passphrase.
-const PASSPHRASE_ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
 /// Generate a passphrase meant to be carried over a *different* channel than
-/// the share link.
-///
-/// Five groups of four symbols is 100 bits of entropy — far beyond anything a
-/// person would invent, and still short enough to dictate over the phone.
+/// the share link. Formatting (grouping, alphabet) lives in `senders-proto`,
+/// shared with `crates/cli`; only the randomness source is browser-specific
+/// here.
 pub fn generate_passphrase() -> Result<String> {
-    const GROUPS: usize = 5;
-    const PER_GROUP: usize = 4;
-
-    let bytes = random_bytes(GROUPS * PER_GROUP)?;
-    let mut out = String::with_capacity(GROUPS * (PER_GROUP + 1) - 1);
-    for (index, byte) in bytes.iter().enumerate() {
-        if index > 0 && index % PER_GROUP == 0 {
-            out.push('-');
-        }
-        // The alphabet is exactly 32 symbols, so masking the low 5 bits is a
-        // uniform choice — no modulo bias.
-        out.push(PASSPHRASE_ALPHABET[(byte & 0x1F) as usize] as char);
-    }
-    Ok(out)
+    Ok(senders_proto::passphrase::format(&random_bytes(
+        senders_proto::passphrase::BYTES,
+    )?))
 }
 
 /// A byte length in bits, as `WebCrypto`'s key and tag parameters want it.
@@ -218,15 +201,6 @@ fn gcm_params(nonce: &[u8]) -> Result<Object> {
     Ok(params)
 }
 
-/// The STREAM nonce for record `counter`.
-fn record_nonce(prefix: &[u8], counter: u32, final_record: bool) -> [u8; NONCE_LEN] {
-    let mut nonce = [0u8; NONCE_LEN];
-    nonce[..NONCE_PREFIX_LEN].copy_from_slice(prefix);
-    nonce[NONCE_PREFIX_LEN..NONCE_PREFIX_LEN + 4].copy_from_slice(&counter.to_be_bytes());
-    nonce[NONCE_LEN - 1] = u8::from(final_record);
-    nonce
-}
-
 /// The three keys for one file, plus the auth key the server will check.
 pub struct FileKeys {
     content: CryptoKey,
@@ -305,7 +279,7 @@ impl FileKeys {
     ) -> Result<Vec<u8>> {
         debug_assert!(plaintext.len() <= CHUNK_SIZE);
         resolve_bytes(subtle()?.encrypt_with_object_and_u8_array(
-            &gcm_params(&record_nonce(prefix, counter, last))?,
+            &gcm_params(&senders_proto::stream::record_nonce(prefix, counter, last))?,
             &self.content,
             plaintext,
         )?)
@@ -322,7 +296,7 @@ impl FileKeys {
         ciphertext: &[u8],
     ) -> Result<Vec<u8>> {
         resolve_bytes(subtle()?.decrypt_with_object_and_u8_array(
-            &gcm_params(&record_nonce(prefix, counter, last))?,
+            &gcm_params(&senders_proto::stream::record_nonce(prefix, counter, last))?,
             &self.content,
             ciphertext,
         )?)
@@ -330,24 +304,7 @@ impl FileKeys {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn nonces_are_unique_per_record_and_mark_the_end() {
-        let prefix = [1u8; NONCE_PREFIX_LEN];
-        let first = record_nonce(&prefix, 0, false);
-        let second = record_nonce(&prefix, 1, false);
-        let last = record_nonce(&prefix, 1, true);
-
-        assert_ne!(first, second, "counter must vary the nonce");
-        assert_ne!(second, last, "the final flag must vary the nonce");
-        assert_eq!(&first[..NONCE_PREFIX_LEN], &prefix);
-        assert_eq!(
-            &second[NONCE_PREFIX_LEN..NONCE_LEN - 1],
-            &1u32.to_be_bytes()
-        );
-        assert_eq!(last[NONCE_LEN - 1], 1);
-    }
-}
+// Nonce construction itself (uniqueness per record, the final-record flag) is
+// tested once, in `senders_proto::stream`; this module has no logic of its
+// own left to unit-test — everything else runs against real `WebCrypto` and
+// is covered by the wasm integration tests instead.

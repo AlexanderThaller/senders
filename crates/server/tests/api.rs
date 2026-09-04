@@ -587,6 +587,44 @@ async fn the_owner_can_add_and_clear_a_passphrase_after_the_fact() {
 }
 
 #[tokio::test]
+async fn the_index_page_gets_the_public_url_substituted_into_its_og_tags() {
+    let static_dir = tempfile::tempdir().expect("temp dir");
+    std::fs::write(
+        static_dir.path().join("index.html"),
+        r#"<meta property="og:image" content="__PUBLIC_URL__/icons/icon-512.png" />"#,
+    )
+    .expect("write index.html");
+
+    let harness = Harness::with_args(&[
+        "--static-dir",
+        static_dir.path().to_str().unwrap(),
+        "--public-url",
+        "https://senders.example.com",
+    ])
+    .await;
+
+    for uri in ["/", "/d/some-share-link"] {
+        let (status, body) = harness
+            .call(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "{uri} did not fall through to the SPA shell"
+        );
+        let body = String::from_utf8(body).unwrap();
+        assert!(
+            body.contains("https://senders.example.com/icons/icon-512.png"),
+            "{uri} did not get the rendered index.html: {body}"
+        );
+        assert!(
+            !body.contains("__PUBLIC_URL__"),
+            "{uri} left the placeholder unsubstituted: {body}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn malformed_passphrase_material_is_refused() {
     let harness = Harness::new().await;
     let caps = Capabilities::default();

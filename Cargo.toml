@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/proto", "crates/server"]
+members = ["crates/cli", "crates/proto", "crates/server"]
 # The Leptos frontend is built for wasm32 by `trunk` and keeps its own lockfile,
 # so it stays out of the native workspace to avoid feature unification with tokio.
 exclude = ["crates/web"]
