@@ -23,6 +23,9 @@ bytes = "1"
 url = { version = "2", features = ["serde"] }
 anyhow = "1"
 indicatif = "0.18"
+# Only to turn the server's absolute expiry into a readable timestamp. Already
+# resolved for the workspace by the server's OIDC dependencies.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 
 aes-gcm = "0.10"
 hkdf = "0.12"

@@ -95,6 +95,15 @@ pub struct UploadResponse {
     pub owner_token: String,
     /// Absolute expiry, seconds since the Unix epoch.
     pub expires_at: u64,
+    /// Download budget the server settled on after clamping the request to
+    /// its configured range — the sibling of `expires_at`, which is likewise
+    /// not necessarily what was asked for.
+    ///
+    /// Optional only for version skew: a client newer than the server it
+    /// talks to would otherwise fail to parse the response to an upload that
+    /// in fact succeeded, and lose the link with it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_downloads: Option<u32>,
 }
 
 /// Unauthenticated pre-flight information a downloader needs before it can
@@ -240,6 +249,23 @@ pub fn plaintext_len(cipher_len: u64) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The reason `UploadResponse::max_downloads` is an `Option`: a client
+    /// newer than the server it talks to must still be able to read the
+    /// response to an upload that succeeded, or the share link is lost.
+    #[test]
+    fn an_upload_response_without_a_download_budget_still_parses() {
+        let older = r#"{"id":"abc","owner_token":"tok","expires_at":42}"#;
+        let response: UploadResponse = serde_json::from_str(older).expect("parses");
+        assert_eq!(response.max_downloads, None);
+
+        let current = serde_json::to_string(&UploadResponse {
+            max_downloads: Some(3),
+            ..response
+        })
+        .expect("serialises");
+        assert!(current.contains(r#""max_downloads":3"#));
+    }
 
     #[test]
     fn length_roundtrip() {
