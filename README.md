@@ -212,6 +212,34 @@ stateless signed cookies, so set the same `SENDERS_SESSION_SECRET` on every
 replica; without one, logins do not survive a restart. An allow-listed domain
 is only honoured when the provider asserts `email_verified`.
 
+### Secrets from files
+
+The two secret settings each have a `_FILE` counterpart that names a file to
+read instead:
+
+| Variable | Reads |
+|---|---|
+| `SENDERS_OIDC_CLIENT_SECRET_FILE` | the OIDC client secret |
+| `SENDERS_SESSION_SECRET_FILE` | the session signing key |
+
+Prefer these wherever a secrets manager delivers material as a mounted file —
+Vault with the secrets-store CSI driver, Docker secrets, systemd credentials.
+The value then never appears in the pod spec, the process environment, or
+`/proc/<pid>/environ`, so it cannot be read out of a `kubectl describe` or a
+crash dump of the environment block.
+
+A `_FILE` variable and its inline form are mutually exclusive; passing both is
+an error rather than a silent precedence rule. One trailing newline is
+stripped, because `openssl rand -base64 32 > file` writes one and a signing key
+that differs by a newline fails in a way that looks like a wrong key. An
+otherwise empty file is rejected: that is a mount which has not been populated,
+not a deliberately empty secret. Both are read once at start-up, so an
+unreadable file stops the server rather than failing the first login.
+
+S3 credentials need nothing of the kind — the AWS SDK's default chain already
+reads `AWS_SHARED_CREDENTIALS_FILE`, so point it at a mounted credentials file
+and leave `AWS_ACCESS_KEY_ID` unset.
+
 ---
 
 ## API
