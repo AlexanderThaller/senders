@@ -101,7 +101,12 @@ fn Masthead(info: Signal<Option<ServerInfo>>) -> impl IntoView {
                                     <span>
                                         {who}
                                         " · "
-                                        <a class="link" href="/auth/logout">
+                                        // `rel="external"` opts out of leptos_router's global
+                                        // click hijacking. Without it, the router treats this as
+                                        // a client-side navigation, finds no matching `<Route>`,
+                                        // and renders `<Missing />` instead of ever reaching the
+                                        // server's `/auth/logout` handler.
+                                        <a class="link" href="/auth/logout" rel="external">
                                             {t().sign_out}
                                         </a>
                                     </span>
@@ -110,7 +115,9 @@ fn Masthead(info: Signal<Option<ServerInfo>>) -> impl IntoView {
                             }
                             None if info.auth_required => {
                                 view! {
-                                    <a class="link" href="/auth/login">
+                                    // Same as `/auth/logout` above: this must reach the server,
+                                    // not the client router.
+                                    <a class="link" href="/auth/login" rel="external">
                                         {t().sign_in}
                                     </a>
                                 }
