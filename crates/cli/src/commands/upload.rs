@@ -30,10 +30,10 @@ pub async fn run(
     let mut keys = FileKeys::derive(&secret)?;
     let nonce_prefix = crypto::random_bytes(NONCE_PREFIX_LEN);
 
-    let password = if args.generate_password {
+    let password = if args.options.generate_password {
         Some(crypto::generate_passphrase())
     } else {
-        args.password.clone()
+        args.options.password.clone()
     };
     let auth_salt = if let Some(password) = &password {
         let salt = crypto::random_bytes(AUTH_SALT_LEN);
@@ -43,7 +43,7 @@ pub async fn run(
         None
     };
 
-    let name = args.name.clone().unwrap_or_else(|| {
+    let name = args.options.name.clone().unwrap_or_else(|| {
         args.file.file_name().map_or_else(
             || args.file.display().to_string(),
             |name| name.to_string_lossy().into_owned(),
@@ -51,7 +51,7 @@ pub async fn run(
     });
     let metadata = FileMetadata {
         name,
-        mime: args.mime.clone(),
+        mime: args.options.mime.clone(),
         size,
     };
 
@@ -80,8 +80,8 @@ pub async fn run(
         auth_hash: b64::encode(&auth_hash),
         nonce_prefix: b64::encode(&nonce_prefix),
         auth_salt: auth_salt.as_deref().map(b64::encode),
-        expires_in: args.expires_in,
-        max_downloads: args.max_downloads,
+        expires_in: args.options.expires_in,
+        max_downloads: args.options.max_downloads,
     };
 
     let response = api::upload(client, base, &params, body).await;
