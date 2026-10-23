@@ -263,6 +263,45 @@ straight into blob storage without buffering the whole file.
 
 ---
 
+## Command-line client
+
+`senders-cli` encrypts and decrypts locally, exactly as the browser does, so it
+can share files with the web frontend in both directions.
+
+The repository is a Nix flake that packages it. Try it without installing:
+
+```sh
+nix run github:athaller/senders -- --help
+```
+
+On NixOS, add the flake as an input and install the package:
+
+```nix
+{
+  inputs.senders.url = "github:athaller/senders";
+
+  outputs = { nixpkgs, senders, ... }: {
+    nixosConfigurations.myhost = nixpkgs.lib.nixosSystem {
+      modules = [
+        ({ pkgs, ... }: {
+          environment.systemPackages = [
+            senders.packages.${pkgs.stdenv.hostPlatform.system}.default
+          ];
+        })
+      ];
+    };
+  };
+}
+```
+
+`senders.overlays.default` adds `pkgs.senders-cli` instead, if you prefer
+overlays; for a single user, `nix profile install github:athaller/senders`.
+
+Unlike the server image, the Nix package is built for baseline x86-64 rather
+than `x86-64-v3`, so it runs on any machine and can come from a binary cache.
+
+---
+
 ## Development
 
 ```sh

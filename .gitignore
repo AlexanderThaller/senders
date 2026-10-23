@@ -10,3 +10,6 @@
 
 # Written by scripts/init-garage.sh; contains local S3 credentials.
 /deploy/garage.env
+
+# nix build output.
+/result
