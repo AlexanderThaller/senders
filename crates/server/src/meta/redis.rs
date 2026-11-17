@@ -13,6 +13,7 @@
 use super::{Claim, FileRecord, MetaStore};
 use anyhow::Context as _;
 use fred::prelude::*;
+use std::time::Duration;
 
 /// Redis sorted-set scores are `f64`. Unix timestamps stay far below 2^53,
 /// where `f64` represents every integer exactly, so this is lossless for any
@@ -56,12 +57,30 @@ pub struct RedisMetaStore {
 
 impl RedisMetaStore {
     /// Connect and verify the server is reachable before returning.
+    ///
+    /// Startup still fails fast on a bad URI or an unreachable server, but a
+    /// connection lost afterwards is re-established in the background.
     pub async fn connect(uri: &str) -> anyhow::Result<Self> {
         let config = Config::from_url(uri).with_context(|| format!("invalid redis URI {uri:?}"))?;
         let client = Builder::from_config(config)
             .with_connection_config(|cfg| {
-                cfg.connection_timeout = std::time::Duration::from_secs(10);
+                cfg.connection_timeout = Duration::from_secs(10);
+                // A half-open connection (Redis host rebooted, NAT entry
+                // dropped) never reports itself closed; treat a reply that
+                // takes this long as a dead connection and reconnect.
+                cfg.unresponsive.max_timeout = Some(Duration::from_secs(10));
             })
+            .with_performance_config(|cfg| {
+                // While disconnected, fred queues commands until the
+                // reconnect lands. Bound that wait so requests and the health
+                // probe fail instead of hanging during a long outage.
+                cfg.default_command_timeout = Duration::from_secs(15);
+            })
+            // Without a policy fred does not reconnect at all: one dropped
+            // connection ("Connection closed.") leaves every later command
+            // failing until the process restarts. Retry forever, backing off
+            // from 100 ms to 5 s.
+            .set_policy(ReconnectPolicy::new_exponential(0, 100, 5_000, 2))
             .build()
             .context("building the redis client")?;
         client.init().await.context("connecting to redis")?;

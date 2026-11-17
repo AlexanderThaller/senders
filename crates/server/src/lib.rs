@@ -174,7 +174,7 @@ fn content_security_policy(index_html: Option<&str>) -> String {
     use std::fmt::Write as _;
 
     let mut script_src = String::from("'self' 'wasm-unsafe-eval'");
-    for script in index_html.map(inline_scripts).unwrap_or_default() {
+    for script in index_html.into_iter().flat_map(inline_scripts) {
         let digest = util::sha256(script.as_bytes());
         let encoded = base64::engine::general_purpose::STANDARD.encode(digest);
         // Writing into the buffer avoids an intermediate allocation per hash.
